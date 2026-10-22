@@ -1,12 +1,13 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-  编译 Porta Windows 客户端（Flutter 版，x64），产物留在源码目录的 flutter\build\windows\x64\runner\Release\。
+  编译 Porta Windows 客户端（Flutter 版，x64），产物（porta.exe、libporta.dll 等）留在源码目录的
+  flutter\build\windows\x64\runner\Release\。
 
 .DESCRIPTION
   先跑 setup-toolchain.ps1。步骤（-Steps 可只跑其中几步，默认全跑）：
     vcpkg   按客户端 vcpkg.json 编 C 依赖（x64-windows-static，二进制缓存在构建目录）
-    patch   跑上游的 Flutter 3.44 源码补丁脚本（已打过会跳过）
+    patch   跑上游的 Flutter 3.44 源码补丁脚本（已打过会跳过），再用本目录钉住的 pubspec.lock 覆盖
     bridge  生成 flutter_rust_bridge 桥接代码（缺文件或 flutter_ffi.rs 更新过才生成，-ForceBridge 强制）
     build   python build.py --portable --flutter --skip-portable-pack --hwcodec [--vram]
   patch、bridge、build 会改动 -Source 里被跟踪的文件（common.dart、pubspec.yaml、pubspec.lock），
@@ -46,9 +47,13 @@ try {
     }
 
     # ---- patch ----
+    $pinnedLock = Join-Path $PSScriptRoot "pubspec.lock.flutter-$($PortaPins.Flutter)"
     if ('patch' -in $Steps) {
         $log = Join-Path $L.Logs "$stamp-patch.log"
         Invoke-Logged $log $tools.GitBash @('.github/patches/apply_flutter_3.44_source_patches.sh')
+        # 补丁改了 pubspec.yaml，仓库里的 pubspec.lock 是上游按 3.24.5 解析的；换成钉住的这份，
+        # 免得每次 pub get 按 caret 范围拉到不同版本
+        Copy-Item $pinnedLock flutter\pubspec.lock -Force
     }
 
     # ---- bridge ----
@@ -78,8 +83,13 @@ try {
         if (-not $NoVram) { $buildArgs += '--vram' }
         Invoke-Logged $log python.exe $buildArgs
         $out = Join-Path $Source 'flutter\build\windows\x64\runner\Release'
-        foreach ($f in 'rustdesk.exe', 'librustdesk.dll', 'flutter_windows.dll', 'data\app.so') {
+        # crate 仍叫 librustdesk，Flutter 的 CMake 拷贝时改名为 libporta.dll
+        foreach ($f in 'porta.exe', 'libporta.dll', 'flutter_windows.dll', 'data\app.so') {
             if (-not (Test-Path (Join-Path $out $f))) { throw "产物缺少 $f：$out" }
+        }
+        # pubspec.yaml 随上游合并会变；pub get 改写了锁文件就说明钉住的那份要更新
+        if ((Get-FileHash flutter\pubspec.lock).Hash -ne (Get-FileHash $pinnedLock).Hash) {
+            Write-Warning "flutter\pubspec.lock 和 $pinnedLock 不一致：确认构建无误后用前者覆盖后者并提交"
         }
         Write-Host "产物：$out" -ForegroundColor Green
     }
