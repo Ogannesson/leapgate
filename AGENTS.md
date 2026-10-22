@@ -28,6 +28,8 @@
 - 2026-10-22 · Exit Node：出口是设备能力（新权限，和 `enable-tunnel` 分开，默认关），服务端登记出口目录，只列给主人和被授权的人；第四期做 SOCKS5/HTTP CONNECT 应用出口，复用多路复用端口转发、放开 `on_open` 的目标校验，只支持 TCP，域名交给被控端解析；默认禁止访问被控端局域网和本机，按网段放行；允许走中继并在界面标明；Porta 被控端拒绝明文裸管道；全局出口（编排 Tailscale/Headscale）不排期；不做自研 VPN（§3.9）。
 - 2026-10-22 · 平台、签名、构建：第一阶段只做 Windows（控制端和被控端）；前两期不签名，驱动名不改、沿用上游已签名的驱动；服务端在 Linux 测试机构建；客户端先本机手工搭、固化成 PowerShell 脚本，稳定后挂 Forgejo Actions（自己的 Windows 机器当 runner），不用 GitHub Actions；产物发 Forgejo Releases（§3.11）。
 - 2026-10-22 · 不支持 Windows 7，只支持 Windows 10 及以上；构建链因此不必照搬上游为 Win7 钉的旧版 Flutter、Rust 1.75 和自编引擎。
+- 2026-10-22 · 第二期编上游现有界面的 Flutter 路线按 B → C → A 依次试：B 官方 Flutter 3.44.9 + 上游源码补丁脚本；C 自编 3.44.9 引擎只打多窗口崩溃那一处补丁；A 照搬上游 x64 的 3.24.5 + 自编引擎（`docs/research/第二期客户端/03`）。Windows 客户端只能在 Windows 上构建，在维护者本机做。
+- 2026-10-22 · 品牌：主界面的"Powered by RustDesk"用内置选项隐藏，关于页保留上游版权行并注明"基于 RustDesk"；`librustdesk.dll` 改名为 `libporta.dll`（接受每次合并上游多几处冲突）。
 
 ## 公开与内部的边界
 - 公开仓库里只放适合开源的通用内容：方案、调研、代码、构建脚本。
