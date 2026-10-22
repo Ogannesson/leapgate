@@ -1,0 +1,2 @@
+# pub 写出的锁文件是 LF；检出成 CRLF 的话，build-client.ps1 的漂移检查每次都会误报
+pubspec.lock.* text eol=lf
