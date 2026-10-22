@@ -1,0 +1,6 @@
+[submodule "server"]
+	path = server
+	url = ../porta-server.git
+[submodule "client"]
+	path = client
+	url = ../porta-client.git

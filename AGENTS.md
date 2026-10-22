@@ -14,6 +14,7 @@
 ## 状态
 - 2026-10-22：架构方案 `docs/architecture.md` 已和维护者逐条确认（第 7 节是决策记录），下一步按第 5 节分期开工，第一期是服务端。调研依据在 `docs/research/`（7 份笔记，基于上游 `rustdesk@bd92623`、`rustdesk-server@873230e`）。
 - 方案只谈抽象分层，部署选址不在方案里。
+- 2026-10-22：第一期（服务端）开工。三个代码仓库都已建好并挂成子模块：`server/` → `porta-server`（起点 `rustdesk-server@873230e`），`client/` → `porta-client`（起点 `rustdesk@bd92623`，和调研基线一致，第二期再合上游正式版本）；两者的 `libs/hbb_common` 都指向 `porta-cardo`（`5d52530`）。子模块地址都是相对路径，新检出用 `git clone --recurse-submodules`。
 
 ## 已定的架构决策（详细理由在 `docs/architecture.md`）
 - 2026-10-22 · 兼容原版 RustDesk 客户端只在最初几个版本提供；兼容带来的代价（上报接口不认证、靠 404 之类的约定判断能力、远程清中继的变通等）要在几个迭代内移除，不长期背着。退出机制见 §3.1。
@@ -46,3 +47,4 @@
 ## 约定
 - 项目说明与知识只写本文件，不建 CLAUDE.md。
 - 提交用 agent 自签。
+- 子模块工作区用 LF：Windows 上检出后在各子模块里设 `core.eol=lf`、`core.autocrlf=false`。sqlx 迁移文件的校验和按字节算，CRLF 检出编出来的程序会和 Linux 构建的对不上。
