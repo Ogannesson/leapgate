@@ -81,6 +81,21 @@ try {
         $log = Join-Path $L.Logs "$stamp-build.log"
         $buildArgs = @('build.py', '--portable', '--flutter', '--skip-portable-pack', '--hwcodec')
         if (-not $NoVram) { $buildArgs += '--vram' }
+        # panic、日志里的 file!() 路径会编进二进制，把本机目录（含用户名）换成中性前缀。
+        # 不能用 RUSTFLAGS / CARGO_ENCODED_RUSTFLAGS：它们会整个顶掉客户端 .cargo/config.toml 里的
+        # +crt-static，链接时 CRT 不匹配；按目标三元组设的这个变量会和配置文件里的合并。
+        # 它按空格分隔，所以路径不能带空格。改了它 cargo 会全量重编一次
+        $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME '.cargo' }
+        $sysroot = (& rustc --print sysroot).Trim()
+        $remap = @{ $cargoHome = '/cargo'; $sysroot = '/rustc'; $Source = '/src' }
+        if ($remap.Keys -match ' ') { throw "路径带空格，--remap-path-prefix 没法传：$($remap.Keys -match ' ')" }
+        $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = ($remap.GetEnumerator() |
+            ForEach-Object { "--remap-path-prefix=$($_.Key)=$($_.Value)" }) -join ' '
+        # cc crate 编的 C/C++（如 hwcodec）里 __FILE__ 同理；MSVC 的 /d1trimfile 去掉前缀。
+        # 用带目标三元组的变量名，只有 cc crate 读，Flutter 的 CMake 不受影响
+        $trim = "/d1trimfile:$cargoHome\ /d1trimfile:$Source\"
+        $env:CFLAGS_x86_64_pc_windows_msvc = $trim
+        $env:CXXFLAGS_x86_64_pc_windows_msvc = $trim
         Invoke-Logged $log python.exe $buildArgs
         $out = Join-Path $Source 'flutter\build\windows\x64\runner\Release'
         # crate 仍叫 librustdesk，Flutter 的 CMake 拷贝时改名为 libporta.dll
