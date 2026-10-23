@@ -396,7 +396,20 @@ S2 是关键场景：它就是 04 §2.5.8 的缺口，现有路径预期判不�
 
 ## 9. 实测结果与建议
 
-（实测完补。）
+（全部场景实测完再写建议；下面先记已经得到的结果。）
+
+### 9.1 2026-10-24 S1 冒烟：台式机（Porta 评估构建，开 TUN）→ Mac（官方 1.5.0，开 TUN）
+
+- **信令通了**：临时分支的 porta-server 转发了 offer，Mac 经 `RelayResponse` 回 answer（Mac 判自己要走中继，answer 照样带回），两边互发候选（台式机 36 个、Mac 9 个）。
+- **C 组（四个开关全开）**：中继在 2.5 秒时建好，ICE 刚进入 checking 就被关掉，连没连得通看不出来。
+- **B 组（只开 WebRTC，中继压 10 秒）**：ICE 在 10 秒里一对都没通，最后走中继。用 `RUST_LOG=…,webrtc_ice=trace` 重启控制端再连一次，trace 日志显示：
+  - 台式机所有物理网卡上的 socket（私网 IPv4、全局 IPv6）都向 Mac 的局域网地址发了检查，**一个回应都没收到**；约 1.5 秒后所有候选对按"重发次数用完"判失败。
+  - 台式机唯一收到过包的 socket 是 Tailscale 网卡上的那个：Mac 从它的 tailnet 地址发来 3 个检查请求，台式机回了成功，但台式机这个 socket 发往 Mac 的检查全部在本机就报 10051（网络不可达）。
+- **原因【实测】：Windows 的 10054 让 ICE socket 静默失效（§4.3、§8 待实测第 3 项）**。每个物理网卡 socket 的第一轮检查里，紧跟在"发往 Mac 局域网地址"之后，就是"发往 Mac 的 TUN 地址 198.18.0.1"（mihomo 的默认地址，台式机自己的 TUN 也是这个地址；IPv6 同理是 `fdfe:dcba:9876::1`）。这个包在本机立刻产生 ICMP 端口不可达，Windows 让这个没 connect 的 UDP socket 的下一次 `recv_from` 返回 WSAECONNRESET（10054）。rustdesk-org/webrtc@49c89bd8 的 `ice/src/agent/agent_internal.rs` `recv_loop` 遇到任何接收错误就返回，调用处是 `let _ = ai.recv_loop(...)`，错误被丢掉、不打日志；这个候选从此只发不收，几毫秒后 Mac 的回应到了也没人收。Tailscale 那个 socket 活下来，正是因为它的发送全在本机就失败、没有引来 ICMP。
+  - 本机复现：在物理网卡地址上开一个 UDP socket，向 198.18.0.1 的任意端口发一个包，`recvfrom` 立即返回 10054；向局域网里一台机器的关闭端口发包，约 5 毫秒后返回 10054。
+  - 影响：只要对端报了一个会在本机或局域网引来 ICMP 端口不可达的候选（对端开着同款 TUN、对端某个端口已关闭、对端的虚拟网卡地址和本机冲突），Windows 控制端对应的 socket 就废了。两端都开 mihomo TUN 时这个条件**必然成立**，因为两端的 TUN 地址一样。
+  - 修法有两种，都要改 rustdesk-org 的 webrtc 分支：给每个候选 socket 设 `SIO_UDP_CONNRESET` 关掉这种报错；或者让 `recv_loop` 在 10054 时继续收。笔记 07 的自研方案已经把前者列为必做。
+- **还要补的对照**：Mac 关掉 TUN 后再测 B 组（预期这次台式机的局域网 socket 不会被打死，ICE 应该能选中局域网那一对），用来确认上面的判断。
 
 ## 参考
 
