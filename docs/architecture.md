@@ -292,7 +292,8 @@ flowchart TB
   - hbbs 从 `rustdesk-server@109d9a2`（2026-07-23，提交说明 "fix more UDP reflection/amplification"）起丢弃从 UDP 上来的 `PunchHoleSent`，而被控端的 UDP 打洞正是用 UDP 发送它。所以开源版的 UDP 打洞实际上是坏的（服务端行为读码确认，对客户端的影响是推测）。上游这么改是为了防 UDP 反射放大攻击。
 - **IPv6 打洞不受 `109d9a2` 影响**【读码】：
   - 控制端没开 UDP 打洞时，被控端的 `rustdesk@bd92623:src/rendezvous_mediator.rs` `fn handle_punch_hole` 会把带着自己 IPv6 地址的 `PunchHoleSent` 经一条临时 TCP 连接发给 hbbs，代码注释专门写明是为了避开 hbbs 对 UDP 来包的处理。
-  - 双方的 IPv6 地址在本机探测（`src/common.rs` `fn test_bind_ipv6` 查路由源地址，失败再用 STUN），夹在信令里经 IPv4 传给对方。hbbs 本身不需要 IPv6，但必须把信令里的 `socket_addr_v6` 转发给对方。原版 hbbs 构造 `PunchHole`、`FetchLocalAddr`、`PunchHoleResponse` 时都把这个字段丢了，所以在原版 hbbs 下 IPv6 打洞根本不会发生（2026-10-22 开工后读码发现，`docs/research/第一期服务端/02` §6.5）。
+  - 双方的 IPv6 地址在本机探测（`src/common.rs` `fn test_ipv6`：先用 `fn test_bind_ipv6` 查路由源地址，再并行问 STUN 服务器），夹在信令里经 IPv4 传给对方。hbbs 本身不需要 IPv6，但必须把信令里的 `socket_addr_v6` 转发给对方。原版 hbbs 构造 `PunchHole`、`FetchLocalAddr`、`PunchHoleResponse` 时都把这个字段丢了，所以在原版 hbbs 下 IPv6 打洞根本不会发生（2026-10-22 开工后读码发现，`docs/research/第一期服务端/02` §6.5）。
+  - 探测用的 STUN 是 4 个第三方服务器：`stun.cloudflare.com`、`stun.l.google.com`、`stun.antisip.com`、`stun.nextcloud.com`（`libs/hbb_common/src/webrtc.rs` 的默认列表）。`fn test_nat_type` 每次都会顺带做这次探测，最多每分钟一次，所以不管开没开 IPv6 打洞，客户端都会定期访问它们【读码】（`docs/research/第二期客户端/02` §3.1）。保留、换成自建，还是只用本机路由探测，是第二期的待定项，由维护者决定。
   - 数据通道是两端之间的 KCP over UDP，不经过 hbbs。
   - 条件：两端都要有公网 IPv6；控制端要打开 `enable-ipv6-punch`，它才会把自己的 IPv6 地址放进请求；hbbs 要转发双方的 IPv6 地址。被控端不检查这个开关，收到对方的 IPv6 地址、又没有被强制中继，就会去打洞（2026-10-22 开工后读码更正，原文"两端都要打开"不对，`docs/research/第一期服务端/01` §4.2）。
   - 反过来，如果在现版 hbbs 下打开 UDP 打洞，`PunchHoleSent` 改走 UDP 后会被丢弃，IPv6 地址也跟着丢失【推测】。所以 UDP 打洞修好之前不要开。
@@ -340,8 +341,9 @@ flowchart TB
 - 运行时变量 `APP_NAME` 和 `ORG`（`rustdesk@bd92623:libs/hbb_common/src/config.rs`）决定 Windows 服务名、注册表项、安装路径、配置目录和 URL scheme（`porta://`）【读码】。这些改掉以后，Porta 和原版 RustDesk 可以装在同一台机器上共存，过渡期很方便。
 - 翻译不用逐条改：`src/lang.rs` 的 `fn translate_locale` 在运行时会把译文里的 "RustDesk" 换成当前的应用名【读码】。
 - 要手工改的写死位置：exe 和 dll 的文件名、各平台的包 ID（`com.carriez.flutter_hbb`）、MSI 打包参数、`res/` 下的打包脚本和图标。默认服务器和公钥的修改见 §3.2 的 hbb_common fork。
-- **副作用要逐条审查**：改名后 `is_custom_client()` 自动为真，会改变 22 处 Dart 和 19 处 Rust 代码的默认行为和更新路径【读码：数量】。这是第二期的一项正式任务。
-- 不改驱动名（RustDeskIddDriver 等），改了要重新给驱动签名【推测】。
+- 只改默认服务器还不够：`api-server` 和自定义 ID 服务器都没配时，上游的 API 地址兜底到写死的 `https://admin.rustdesk.com`（`rustdesk@bd92623:src/common.rs` `fn get_api_server_`），不随 `RENDEZVOUS_SERVERS` 变，登录、地址簿的请求会发到 RustDesk 官方；`fn using_public_server` 也只看自定义服务器，主页会显示指向官方定价页的提示【读码】。Porta 已用挂钩处理：兜底地址改由 `libs/porta` 的 `porta::brand::default_api_server()` 给出，优先用构建时注入的 `PORTA_API_SERVER`，没设时按同样的规则从内置会合服务器推导，两者都没有就返回空串；`using_public_server` 在 Porta 里恒为假【读码】。
+- **副作用要逐条审查**：改名后 `is_custom_client()` 自动为真，会改变一批 Rust 和 Dart 代码的默认行为和更新路径：Rust 侧 15 个调用点（其中 12 个真正改变行为，10 个在 Windows 上生效），Dart 侧 10 处直接调用，另有 27 处通过 7 个 `defaultOption*` 默认值间接受影响【读码：数量见 `docs/research/第二期客户端/01` §2】。初稿写的"22 处 Dart、19 处 Rust"大概是按字面含有这个函数名的行数的，没有算间接影响【推测】。这是第二期的一项正式任务。
+- 不改驱动名，改了要重新给驱动签名【推测】。上游 Windows 默认的虚拟显示驱动是第三方 Amyuni 的 `usbmmidd`（`rustdesk@bd92623:src/virtual_display_manager.rs` 的 `IDD_IMPL`），RustDeskIddDriver 只留着代码路径，上游构建不打包它；打印机驱动是 `RustDesk v4 Printer Driver`【读码】。
 - 不用上游的 `custom.txt` 改名机制：它需要 RustDesk 官方私钥签名，开源版用不了【读码】。
 
 ### 3.11 平台、签名和构建
@@ -354,7 +356,7 @@ flowchart TB
   - 影响：从网上下载的 exe 会被 SmartScreen 拦一下；本机编译出来的文件不带"来自网络"标记，一般不会被拦【推测】；UAC 显示"未知发布者"；个别杀毒软件可能误报。
   - 驱动名不改，原样分发上游已签名的虚拟显示驱动和打印机驱动，签名应该仍然有效【推测】，第二期验证。
   - 分发给朋友之前再定签名方案，候选是商业代码签名证书、微软的托管签名服务，或者只在自己的设备上信任自签根证书。价格和个人申请资格到时再查一手来源。
-  - 上游的"检查更新"在 `is_custom_client()` 为真时直接跳过（`rustdesk@bd92623:src/common.rs` `fn check_software_update`）【读码】，所以改名后不会去 RustDesk 官方拉取新版本。Porta 自己的自动更新以后再做。
+  - 上游的"启动时检查更新"在 `is_custom_client()` 为真时直接跳过（`rustdesk@bd92623:src/common.rs` `fn check_software_update`），但 Windows 的后台自动更新不看它：安装版的服务进程由 `src/rendezvous_mediator.rs` `fn start_all` 启动自动更新，`src/updater.rs` `fn check_update` 只看 `allow-auto-update`，打开后会把设备指纹发到 `api.rustdesk.com`，下载原版 RustDesk 安装包并以特权身份运行【读码】。这个选项默认关，但 Windows 安装版的设置页仍显示"Auto update"勾选框，服务端心跳策略也能把它打开。Porta 已在 `check_update` 开头加挂钩（`porta::update::official_update_disabled()`，恒为真），所以两条路径都不会去 RustDesk 官方拉取新版本【读码】。Porta 自己的自动更新以后再做。
 - **构建**：
   - 服务端在 Linux 测试机上构建和测试，用普通的 `cargo build`，可以交叉编译成 musl 静态二进制。第一期只需要这一步。
   - 客户端（第二期）先在本机 Windows 上手工搭一次，边搭边固化成 PowerShell 脚本。Rust 用当前的稳定版；vcpkg 依赖按上游清单安装，配本地二进制缓存。稳定后再挂到 Forgejo Actions，用自己的 Windows 机器当 runner。
@@ -397,7 +399,7 @@ flowchart TB
   - 建 `porta-client` fork（`porta-cardo` 在第一期已经建好），挂进总仓库的 `client/`。
   - 改名、换图标。
   - 跑通 Windows 构建（不签名）。
-  - 审查 `is_custom_client()` 的 41 处影响。
+  - 审查 `is_custom_client()` 的影响（Rust 15 处，Dart 直接 10 处、间接 27 处，见 §3.10）。
   - 搭好 `libs/porta` 和 `porta_ffi.rs` 的空骨架。
   - 写冒烟清单。
   - 验收：Porta 客户端和原版 RustDesk 能装在同一台机器上共存，并且能互相连接。
@@ -417,7 +419,7 @@ flowchart TB
 
 - hbbs 要能看到真实的公网源 IP（§3.7 前提二），否则按 IP 选中继无效。
 - 上游的热点文件正好是 Porta 要加挂钩的文件，合并冲突免不了，只能靠"只加挂钩"把冲突压小。
-- `is_custom_client()` 的 41 处行为变化审查完之前，改名后的行为不可预期。
+- `is_custom_client()` 的行为变化（§3.10）审查完之前，改名后的行为不可预期。
 - 多路复用隧道的吞吐、hbbr 限速对出口体验的影响，都还没有实测。
 - UDP 打洞的防伪造随机数方案还没细化，要先确认 `PunchHole` 链路上能不能可靠地把随机数带给被控端。
 - 第一级所用 IP 库在各地的精度没有验证过。
