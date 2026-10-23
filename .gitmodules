@@ -1,6 +1,6 @@
 [submodule "server"]
 	path = server
-	url = ../porta-server.git
+	url = ../leapgate-server.git
 [submodule "client"]
 	path = client
-	url = ../porta-client.git
+	url = ../leapgate-client.git
