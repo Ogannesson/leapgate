@@ -17,6 +17,7 @@
 - 2026-10-22：第一期（服务端）开工。三个代码仓库都已建好并挂成子模块：`server/` → `porta-server`（起点 `rustdesk-server@873230e`），`client/` → `porta-client`（起点 `rustdesk@bd92623`，和调研基线一致，第二期再合上游正式版本）；两者的 `libs/hbb_common` 都指向 `porta-cardo`（`5d52530`）。子模块地址都是相对路径，新检出用 `git clone --recurse-submodules`。
 
 - 2026-10-23：第一期服务端实现完成并合进 porta-server main（`7c85b95`，321 个测试）。实施契约是 `server/PORTA.md`，所有取值、取舍和实测依据都写在里面。经过八轮审查：前三轮查功能正确性；后五轮查资源上限，覆盖会合端口的帧长、并发和注册限流，21114 的连接保护和超时，地址簿、设备表、审计表的上限，WAL 上界和强制 checkpoint，以及会合主循环的独立连接池。最后一轮只剩说明性的小问题。还剩部署（选机器、迁移现网数据），由维护者安排。
+- 2026-10-23：第三期第一项"TUN 下的局域网直连（多候选地址）"合进 main：porta-client `6bb19b190`（契约 `client/PORTA.md` §3）、porta-server `d8403ad`（转发 `porta_local_addrs`）、proto 在 porta-cardo `1a46681`（服务端线）/`df76a0c`（客户端线）。经两轮审查和一轮复核，等维护者用两台开 TUN 的 Windows 端到端测。
 
 ## 已定的架构决策（详细理由在 `docs/architecture.md`）
 - 2026-10-22 · 兼容原版 RustDesk 客户端只在最初几个版本提供；兼容带来的代价（上报接口不认证、靠 404 之类的约定判断能力、远程清中继的变通等）要在几个迭代内移除，不长期背着。退出机制见 §3.1。
