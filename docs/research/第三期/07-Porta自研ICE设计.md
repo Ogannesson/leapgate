@@ -32,7 +32,7 @@
   3. 防伪造、防反射三份里最完整：公网 IPv4 候选必须带服务端签发的"反射地址证明"。
   4. 嫁接 C 的信令以后，上游文件只加 **3 处挂钩**，不改任何函数签名（B 原稿要改 `connect()` 和 `create_relay` 两个签名、约 10 处）。
   5. 以后能做续选和 ICE-TCP，不被冻结的 0.13 分支锁死。
-- **回答"有哪些可用的 ICE"**：Rust 里能用的有 webrtc-rs 的 `webrtc-ice`（上游 RustDesk 钉在 0.13 的分支，官方最后一条维护线 0.17.2）、webrtc-rs 新的 sans-IO 栈 `rtc-ice` 0.21、从 str0m 拆出来的 sans-IO 内核 `is` 0.11、GStreamer 开发者的 `rice-proto` 0.4；C 库有 libjuice、libnice、pjnath；UU 用的是 Google libwebrtc（C++）。表和取舍在 §10.1。
+- **回答"有哪些可用的 ICE"**：Rust 里能用的有 webrtc-rs 的 `webrtc-ice`（上游 RustDesk 钉在 0.13 的分支，官方最后一条维护线 0.17.2）、webrtc-rs 新的 sans-IO 栈 `rtc-ice` 0.21、从 str0m 拆出来的 sans-IO 内核 `is` 0.11、GStreamer 开发者的 `rice-proto` 0.4；C 库有 libjuice、libnice、pjnath；UU 用的是 Google libwebrtc（C++），它的 ICE 层能单独拿来用，但要自写 C++ 胶水、搭 Chromium 工具链（对照见 §10.5）。表和取舍在 §10.1。
 - **回答"自研的好处是"**（和直接用上游 WebRTC 路径比）：
   1. **优先级按网络代价排**，TUN、Tailscale、虚拟机网卡根本不收集；webrtc-rs 0.13 所有 host 候选同优先级，开 TUN 时可能选中经 TUN 的对（笔记 06 §2.5）。
   2. **信令简单**：不做 trickle，服务端不用转发 `IceCandidate`、不用一直占着控制端的 TCP 连接（笔记 06 §3.3 里最难的两件事）。
@@ -422,7 +422,7 @@ MVP 明细：
 | `is`（从 str0m 拆出来的 ICE agent） | sans-IO，不收集、不碰 socket | UDP、TCP 候选 | 0.11.1（2026-09-25），MIT/Apache | 嵌入的首选候补（§9 Q3）；能力和可配参数未核实 |
 | `rice-proto` / librice | sans-IO 内核 + 异步外壳 | UDP、TCP、TURN | 0.4.3（2026-05-11），下载量小 | 标准覆盖最全，成熟度和社区小于 `is` |
 | libjuice、libnice、pjnath（C） | 自带 socket | libjuice 只有 UDP | 活跃 / 老牌 | 要写 FFI、依赖重，不考虑 |
-| Google libwebrtc（C++，UU 用它） | 全套 WebRTC | UDP、TCP、TURN | 活跃 | 体量太大，不考虑 |
+| Google libwebrtc（C++，UU 用它） | 全套 WebRTC；ICE 层 `P2PTransportChannel` 可以不经 PeerConnection 单独用，但不是稳定 API | UDP、TCP、TURN | 活跃，Chrome 现在每两周一个里程碑 | 技术上可行，要写 C++ 胶水、搭 Chromium 工具链；Rust 现成绑定（LiveKit）只给 PeerConnection。列为备选，对照见 §10.5 |
 | 上游 RustDesk 的 WebRTC 路径 | 整个 WebRTC（ICE + DTLS + SCTP） | UDP | 早期（笔记 06 约 2/5） | 正在评估（笔记 06） |
 
 STUN 编解码另有 `stun_codec`（Porta 依赖树里是 0.3.5，最新 0.4.0）、`stun-types`、`stun-rs`；本方案用已在树里的 0.3.5，不加新依赖。
@@ -468,6 +468,37 @@ STUN 编解码另有 `stun_codec`（Porta 依赖树里是 0.3.5，最新 0.4.0�
 - **B 不按原稿做**：上游侵入面最大（两个热点函数签名），被控端有 ICE 就放弃 TCP 打洞。主体保留，信令换成 C 的。
 - **C 不做长期方案**：和维护者"Porta 自己做"的方向冲突，fork 冻结且带已知缺陷，开 TUN 跨网拿不到真 P2P，控制端网卡排不了序，数据面多一层；对公网候选不设防。只在 Q1 选了"先快速上线"时作过渡。
 
+### 10.5 对照：像 UU 一样直接用 libwebrtc
+
+UU 不是自研 ICE，用的是网易改过的 libwebrtc，局域网直连全靠它自带的能力（笔记 05 §2、§3）。这里把"Porta 也直接用 libwebrtc 的 ICE 层"当第四个选项，和本方案、嵌入 sans-IO 库（§9 Q3）放在一起比。下列出处 2026-10-24 查。
+
+**1. 只用 ICE 层可不可行：可行，但全是内部接口。**
+- `api/ice_transport_factory.h` 的 `CreateIceTransport` 注释写明可以不经 PeerConnection 建 ICE 传输；`IceTransportInterface::internal()` 返回的 `IceTransportInternal` 继承 `PacketTransportInternal`，有 `SendPacket(data, len, options)` 和 `RegisterReceivedPacketCallback`，STUN 检查在内部消化，上层收发的就是选中对上的原始 UDP 载荷【官方：源码头文件】。KCP 能跑在上面，不必回到 SCTP；只有用 PeerConnection + DataChannel 时才是 DTLS + SCTP 数据面。
+- 先例：Chrome 远程桌面旧协议的 `remoting/protocol/ice_transport_channel.cc` 就是直接建 `P2PTransportChannel` + 自己的 PortAllocator，包成数据报 socket 跑自己的协议；这套代码 2026-04-18 随旧协议删除（Chromium 提交 `e8ee8449`），Google 自己已经不这样用了【官方：Chromium 源码】。
+- 不稳定：WebRTC `native-api.md` 只把 `api/` 算公开接口，没列出的目录（含 `p2p/`）可以随时不兼容地改、不预告；`internal()` 的注释也写着以后要停止暴露 `IceTransportInternal`【官方】。CRD 那份代码几年里就跟着改过构造方式（构造函数 → `P2PTransportChannel::Create(IceTransportInit)`）、回调（`Signal*` → `Subscribe*`）和命名空间（`cricket::` → `webrtc::`）【官方：对比 Chromium 新旧两版】。
+- 必须自写 C++ 胶水：起 libwebrtc 的网络线程、配 `BasicPortAllocator`（构造时可传入自己的 `NetworkManager`）、把候选和包经 cxx 桥到 Rust。socket 归 libwebrtc 管，而 `KcpStream` 要求传入已 `connect` 的 `UdpSocket`（§2.1），要给它加一个"按回调收发包"的后端，或在本机多绕一层回环 UDP【读码 + 推测】。
+
+**2. Rust 现成绑定：LiveKit 的 `webrtc-sys` 0.3.51 / `libwebrtc`（Apache-2.0）没有 p2p 层。** 预编译库从 `livekit/rust-sdks` 的 `webrtc-<提交>` 发布下载（`webrtc-sys-build` 里写死 URL），共 11 个包：win、linux、mac 的 x64/arm64，android 三种，iOS 真机和模拟器；最新一版基于 m150，`webrtc-win-x64-release.zip` 约 114 MB（静态库 + 全部头文件）【官方：crates.io、构建脚本、GitHub 发布页】。封装的是 PeerConnection、DataChannel、音视频轨、统计、ICE 候选字符串（`webrtc-sys/src` 里没有 p2p 相关文件）【官方：仓库目录】。直接用它就等于上游 RustDesk 的 WebRTC 路径（笔记 06）；要 p2p 层，仍得在它的头文件和静态库上自写胶水（p2p 是 PeerConnection 的依赖，符号应在库里【推测】），还受 LiveKit 的发布节奏约束。没找到其他暴露 p2p 层的 Rust 绑定。
+
+**3. 自己编的成本。**
+- 工具链 depot_tools + gclient + gn + ninja，Windows 要求跟 Chromium：当前文档写 VS 2026（18.0+）、Windows SDK 10.0.28000.2270、内存至少 8 GB（建议 16 GB 以上）、100 GB 空闲 NTFS 磁盘，拉源码"快网也要一小时以上"【官方】。WebRTC 文档给的检出体积 Linux 6.4 GB（没给 Windows），`--no-history` 能明显变小【官方】。
+- `p2p/BUILD.gn` 里 `p2p_transport_channel`、`basic_port_allocator`、`tcp_port`、`stun_port` 都是独立 target，不依赖 `pc/`、`media/`，但经 `rtc_base:ssl` 带进 BoringSSL【官方】。编译耗时没有官方数字，只编这些 target 在维护者台式机上估计几十分钟【推测】。
+- 和 Porta 链接：客户端已是静态 CRT（`+crt-static`，和 Chromium 默认一致）【读码：`client/.cargo/config.toml`】；但依赖树里有 `openssl-sys`，和 BoringSSL 的同名符号可能冲突（要给 BoringSSL 加符号前缀或改成动态库）【待实测】；胶水要和 libwebrtc 用同一套 C++ 标准库【推测】。
+- 升级：Chrome 从 2026 年 9 月起每两周一个里程碑（此前四周）【官方：Chromium `release_cycle.md`】。p2p 层不保证兼容，跟版本就要改胶水；钉版本就要自己盯 STUN/TURN 解析类的安全修复。
+
+**4. 体积和许可证。** 增量没有官方数字。参照：本机 UU 的 `streamer.dll` 19.1 MB（整套 libwebrtc + 视频 + QUIC + OpenSSL）【读码：本机文件大小】，LiveKit 的 `ffi-windows-x86_64.zip` 10.9 MB（整套 WebRTC + LiveKit）【官方：发布页】；只链 p2p + rtc_base + abseil + BoringSSL，估计让 `libporta.dll`（现约 39.7 MB）多 2~5 MB【推测】。许可证：WebRTC 本体 BSD 3-Clause，另附 Google 专利授权（对 WebRTC 发起专利诉讼即终止）【官方：`LICENSE`、`PATENTS`】；要带的 abseil、BoringSSL 现在都是 Apache-2.0【官方】。BSD-3 和 Apache-2.0 都和 GPLv3（AGPLv3 同）兼容【官方：FSF 许可证列表】，能链进 Porta，分发时附各组件许可证文本。
+
+**5. 能继承的和要自己补的。**
+- 继承（就是 UU 日志里起作用的那些）：按网络代价排序（以太网 0、WLAN 10、未知 50）、每块网卡的 host 候选、IPv6 host（默认最多 5 个 IPv6 网络，和笔记 05 看到的名额一致）、ICE-TCP（`tcp_port`）、续选（`IceParameters` 的 renomination 开关）、持续收集（`IceConfig.continual_gathering_policy`）、prflx、按网络失败重收集【官方：`rtc_base/network.cc`、`basic_port_allocator.cc`、`ice_transport_internal.h`】。
+- 自己补：信令（同 §2.2）、服务端 STUN（同第二步，不用第三方 STUN）、反射地址证明和 OFFER 签名（在信令层做，同 §5.2）、KCP 交接、竞速挂钩。
+- **物理网卡过滤恰好是 libwebrtc 在 Windows 上的短板**：Windows 分支只按 `IfType` 认以太网、WLAN、蜂窝、回环，其余（Wintun 一类 TUN、Tailscale）都是 `UNKNOWN`、代价 50，不排除；按名字认 `tun`/`tailscale` 的函数只在 POSIX 分支调用；release 构建里网卡名是序号，按名字的 `set_network_ignore_list` 实际用不上【官方：`rtc_base/network.cc` WEBRTC_WIN 分支】。可用的口子：`network_ignore_mask`（按类型，屏蔽 UNKNOWN 会误伤其他物理网卡）、`set_vpn_list` + `vpn_preference = kNeverUseVpn`（把网段标成 VPN 再排除，要先自己认出 TUN 的前缀），或自己实现 `NetworkManager`、把 `lan.rs` 的 `is_physical` 搬过去——最后一种最贴合 §2.3，也是胶水里最大的一块【官方 + 推测】。host socket 同样绑网卡地址，TUN 下的强主机前提（§1 风险 1）照样要实测。
+
+**6. 和本方案比**【推测】
+- 工作量：本方案 MVP + 第二步约 13~16 天。libwebrtc 路线：Windows 构建链和链接问题 3~5、C++ 胶水（线程、NetworkManager、分配器配置、候选和包的 FFI）4~6、KCP 回调后端 1.5~2、信令和服务端（含 STUN、证明）约 5~6、竞速挂钩和测试 2~3，合计约 16~22 天。省掉的是检查内核和收集（约 5 天），多出来的是构建和胶水。续选、ICE-TCP 基本现成（本方案第三步 10~14 天），算到完整版两边大致持平，libwebrtc 可能略省。依据：§7.1 明细，以及第二期搭 Flutter 引擎构建链的经验（同属 Chromium 系工具链，`docs/research/第二期客户端/03`）。
+- 风险：p2p 层不是稳定 API，Google 自家的同类用法已经删掉；Windows 构建链重，且每两周一版；BoringSSL 和 OpenSSL 可能符号冲突；排错要下到 C++ 层，审查面从约 500 行 Rust 变成外部 C++ 大库加胶水；TUN 过滤仍要自己写。
+- 维护：要么钉版本、自己盯安全公告，要么每隔几个里程碑合一次并改胶水；本方案只维护自己的约 500 行内核加 `stun_codec`。
+- **结论：值得作为备选，不推翻推荐。** 适用条件是"续选和 ICE-TCP 要尽快到位"，并且维护者接受在本机再搭一套 Chromium 工具链；MVP 阶段本方案更省、更可控。
+
 ## 11. 上游 WebRTC 实测（笔记 06 §6）能帮自研回答哪些问题
 
 评估测的 webrtc-ice 0.13 的 host 候选正好是"每个物理 IP 绑一个 socket"（`agent_gather.rs` L289~293【读码】），和本方案的 socket 模型相同；它的 srflx 是 `0.0.0.0` socket，正好能和本方案对照。所以评估顺带记几项，就能回答自研要依赖的前提。
@@ -495,3 +526,9 @@ STUN 编解码另有 `stun_codec`（Porta 依赖树里是 0.3.5，最新 0.4.0�
 - RFC 8445（§5.1.2、§6.1.2.3/4、§7.2.2、§7.2.5.2.1、§7.3.1.3/4、§19.5.1）、RFC 5389/8489、RFC 5769、RFC 7675、RFC 6544、RFC 4571。
 - crates.io（2026-10-24）：https://crates.io/crates/is 、https://crates.io/crates/rice-proto 、https://crates.io/crates/webrtc-ice 、https://crates.io/crates/rtc-ice 、https://crates.io/crates/str0m 、https://crates.io/crates/stun_codec
 - webrtc-rs v0.17.2 发布页：https://github.com/webrtc-rs/webrtc/releases/tag/v0.17.2 ；str0m 的 ICE 设计取舍：https://github.com/algesten/str0m/blob/main/docs/ice.md
+- §10.5 libwebrtc 对照（2026-10-24 查）：
+  - WebRTC 接口边界：https://webrtc.googlesource.com/src/+/main/native-api.md ；源码 https://webrtc.googlesource.com/src/+/main/api/ice_transport_factory.h 、https://webrtc.googlesource.com/src/+/main/api/ice_transport_interface.h 、https://webrtc.googlesource.com/src/+/main/p2p/base/packet_transport_internal.h 、https://webrtc.googlesource.com/src/+/main/p2p/base/ice_transport_internal.h 、https://webrtc.googlesource.com/src/+/main/p2p/client/basic_port_allocator.cc 、https://webrtc.googlesource.com/src/+/main/p2p/BUILD.gn 、https://webrtc.googlesource.com/src/+/main/rtc_base/network.cc 、https://webrtc.googlesource.com/src/+/main/rtc_base/network.h 、https://chromium.googlesource.com/external/webrtc/+/master/rtc_base/network_constants.h
+  - 许可证：https://webrtc.googlesource.com/src/+/main/LICENSE 、https://webrtc.googlesource.com/src/+/main/PATENTS 、https://boringssl.googlesource.com/boringssl/+/HEAD/LICENSE 、https://www.gnu.org/licenses/license-list.html
+  - Chrome 远程桌面旧协议：https://chromium.googlesource.com/chromium/src/+/6ee3589bcc56744810531730b1de54355ef356ef/remoting/protocol/ice_transport_channel.cc （新版）、https://chromium.googlesource.com/experimental/chromium/src/+/64.0.3282.20/remoting/protocol/ice_transport_channel.cc （M64 旧版）、删除提交 https://chromium.googlesource.com/chromium/src/+/e8ee8449f69743ff719e8e1435c907def15c04c5
+  - 构建和发布节奏：https://webrtc.googlesource.com/src/+/main/docs/native-code/development/ 、https://chromium.googlesource.com/chromium/src/+/main/docs/windows_build_instructions.md 、https://chromium.googlesource.com/chromium/src/+/main/docs/process/release_cycle.md
+  - LiveKit：https://crates.io/crates/webrtc-sys 、https://docs.rs/webrtc-sys-build/latest/src/webrtc_sys_build/lib.rs.html 、https://github.com/livekit/rust-sdks/releases/tag/webrtc-a545de4 、https://github.com/livekit/rust-sdks/releases/tag/webrtc-9f6a87a 、https://github.com/livekit/rust-sdks/tree/main/webrtc-sys/src 、https://github.com/livekit/rust-sdks/releases/tag/livekit-ffi/v0.13.2
