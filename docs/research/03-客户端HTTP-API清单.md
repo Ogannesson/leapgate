@@ -1,5 +1,7 @@
 # 03 · RustDesk 客户端 HTTP API 清单与 rustdesk-api 对照
 
+> Porta 是当时的工作名，2026-10-24 改名为 Leapgate（跃门）。
+
 - 调研日期：2026-10-22
 - 客户端：`rustdesk@bd92623`（本地 `upstream/rustdesk`，2026-10-21）
 - 第三方 API：`rustdesk-api@c5687e1`（本地 `upstream/rustdesk-api`，lejianwen，2025-09-29；`git ls-remote` 确认这仍是 GitHub master 最新提交）

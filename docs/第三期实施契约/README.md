@@ -1,12 +1,12 @@
 # 第三期实施契约（总述）
 
-状态（2026-10-23）：P-1、P-3、P-4 已定；P-2 维护者定了原则（§1.1）。**维护者随后调整了顺序：先评估上游现成的 WebRTC/ICE 路径（04 §3.6，评估笔记 `docs/research/第三期/06-WebRTC评估.md`），01、02 照常实施；03、04 搁置，等评估结果再定**——评估通过，直连改走 ICE，03、04 里自写的局域网多候选扩展、UDP 出口证明等大部分不做；评估不通过，按本目录的 03、04 实施，那时再请维护者确认 UDP 出口证明。01、02 已确认、开始实施；各块验收后按"同步清单"写回两份 PORTA.md，本目录保留为第三期的设计记录。
+状态（2026-10-23）：P-1、P-3、P-4 已定；P-2 维护者定了原则（§1.1）。**维护者随后调整了顺序：先评估上游现成的 WebRTC/ICE 路径（04 §3.6，评估笔记 `docs/research/第三期/06-WebRTC评估.md`），01、02 照常实施；03、04 搁置，等评估结果再定**——评估通过，直连改走 ICE，03、04 里自写的局域网多候选扩展、UDP 出口证明等大部分不做；评估不通过，按本目录的 03、04 实施，那时再请维护者确认 UDP 出口证明。01、02 已确认、开始实施；各块验收后按"同步清单"写回两份 LEAPGATE.md，本目录保留为第三期的设计记录。
 
-第三期要做的事：Porta 客户端的上报改走新接口并签名；服务端按客户端实测的延迟选中继；局域网直连在"路由器透明代理只代理 TCP""本机开 TUN 代理"的网络里也能成，并且用上 IPv6；UDP 打洞第一次真正跑起来。
+第三期要做的事：Leapgate（原工作名 Porta，2026-10-24 改名）客户端的上报改走新接口并签名；服务端按客户端实测的延迟选中继；局域网直连在"路由器透明代理只代理 TCP""本机开 TUN 代理"的网络里也能成，并且用上 IPv6；UDP 打洞第一次真正跑起来。
 
 | 文件 | 内容 | 依据 |
 |---|---|---|
-| [01-上报与认证.md](01-上报与认证.md) | 新路径 `/api/porta/v1/`、设备签名、公钥锁定、防降级、响应签名、严格 TLS | 笔记 02、03 |
+| [01-上报与认证.md](01-上报与认证.md) | 新路径 `/api/leapgate/v1/`、设备签名、公钥锁定、防降级、响应签名、严格 TLS | 笔记 02、03 |
 | [02-路由第二级.md](02-路由第二级.md) | 客户端测速上报、服务端按实测选中继、被控端改用服务端下发的中继 | 笔记 01 |
 | [03-局域网判定与候选.md](03-局域网判定与候选.md) | IPv6 局域网候选、网卡分类、默认 ID 加盐（原第 1 项"同网判定加 UDP 比较"已排除，改由 04 块解决） | 笔记 04、05、02 §1.8 |
 | [04-UDP打洞与NAT探测.md](04-UDP打洞与NAT探测.md) | UDP 打洞的前置障碍、UDP 出口证明（同网判定和 UDP 打洞目标）、开 TUN 时的 NAT 类型、开 TUN 时 IPv6 打洞绑物理网卡、WebRTC/ICE 评估项 | 笔记 05 |
@@ -17,7 +17,7 @@
 
 ### 1.1 已定的四件事
 
-**P-1 UDP 打洞进第三期（已定，按推荐）**（04 块）。改的是架构 §3.8 原来的"UDP 打洞修不修，第三期看中继回落率再定"。理由：开源服务端从不在 UDP 上回 NAT 测试（`TestNatRequest`），控制端的 `udp_port` 永远是 0，UDP 打洞从来没运行过，回落率数据说明不了它值不值得修（笔记 05 §5）。做法：只修前置障碍、做普通 UDP 打洞。服务端在 UDP 上回 NAT 测试（限速）、接受 UDP 来的 `PunchHoleSent`（带防伪造随机数，UDP 上永不回包）、只对会回带随机数的 Porta 被控端转发 `udp_port`；Porta 控制端对自建服务器默认打开 UDP 打洞。UU 远程的日志里两端家宽都判为锥形 NAT（Cone），普通反射地址打洞大概率够用；端口预测、多端口这类重手段继续排最后。
+**P-1 UDP 打洞进第三期（已定，按推荐）**（04 块）。改的是架构 §3.8 原来的"UDP 打洞修不修，第三期看中继回落率再定"。理由：开源服务端从不在 UDP 上回 NAT 测试（`TestNatRequest`），控制端的 `udp_port` 永远是 0，UDP 打洞从来没运行过，回落率数据说明不了它值不值得修（笔记 05 §5）。做法：只修前置障碍、做普通 UDP 打洞。服务端在 UDP 上回 NAT 测试（限速）、接受 UDP 来的 `PunchHoleSent`（带防伪造随机数，UDP 上永不回包）、只对会回带随机数的 Leapgate 被控端转发 `udp_port`；Leapgate 控制端对自建服务器默认打开 UDP 打洞。UU 远程的日志里两端家宽都判为锥形 NAT（Cone），普通反射地址打洞大概率够用；端口预测、多端口这类重手段继续排最后。
 
 **P-2 维护者定的是原则，不是选项**（04 块 §2.5，原 03 块第 1 项）。原来的三个选项（按发起方 ID 比 UDP 注册 IP 并按设备主人、地址簿权限放行；只写环境规则；直接比）都被否掉。维护者的原则，**适用于整份契约**：
 
@@ -29,15 +29,15 @@
 
 - 问题的根因是服务端拿两种协议的观测去比：发起方打洞请求的 TCP 来源 IP，对被控端 UDP 注册的来源 IP。路由器透明代理只代理 TCP 时，前者是代理出口，于是误判"不在同一局域网"；UDP 打洞也因为服务端把 TCP 来源 IP 和 UDP 映射端口拼成一个地址而必然失败。
 - 改成比同一种协议的观测：服务端回 UDP NAT 测试时附一个 token，里面是服务端看到的发起方 UDP 来源地址和时间，用只在内存里的密钥做 MAC（无状态，30 秒有效）。发起方把 token 原样放进打洞请求，证明自己确实在那个 UDP 地址上收得到包；服务端拿 token 里的 IP 和被控端的 UDP 注册 IP 比，结果和原有 TCP 比较取"或"。被控端的 UDP 打洞也改打 token 里的地址。
-- 防放大：Porta 控制端的 NAT 测试请求填充到 66 字节，服务端只对不短于 64 字节的请求附 token，带 token 的回包最长 49 字节。
-- 不需要 `porta_from_id`，不查令牌、设备主人或地址簿；用户什么都不用配。
+- 防放大：Leapgate 控制端的 NAT 测试请求填充到 66 字节，服务端只对不短于 64 字节的请求附 token，带 token 的回包最长 49 字节。
+- 不需要 `leapgate_from_id`，不查令牌、设备主人或地址簿；用户什么都不用配。
 - **剩余缺口**：发起方和被控端到服务端的 UDP 都被代理、而且两边出口不同时（例如两台机器各走不同的代理节点），服务端仍然判不出同一局域网，退到 IPv6 打洞、UDP 打洞和中继，不比现在差。补这个缺口的是 04 §3.6 的 WebRTC/ICE 评估项（客户端自己对候选逐对实测，不靠服务端判）。
 
-原则同样落到了别处：开 TUN 时 IPv6 打洞改成直接绑物理网卡的全局 IPv6（04 §4.4，原先是"先验收再决定"）；§5 改成"不配也能用"，Porta 不要求用户配置任何代理规则。
+原则同样落到了别处：开 TUN 时 IPv6 打洞改成直接绑物理网卡的全局 IPv6（04 §4.4，原先是"先验收再决定"）；§5 改成"不配也能用"，Leapgate 不要求用户配置任何代理规则。
 
 **P-3 开 TUN 时 TCP 测出"对称 NAT"：维护者无偏好，按推荐 A**（04 块）。TUN 会终结 TCP 再重新发起，源端口变了，用 TCP 测 NAT 类型会误判成对称 NAT，任一端对称时被控端对 IPv4 直接走中继。UU 的日志显示 TUN 下 UDP 的反射地址就是家宽出口。A 的做法：服务端给了随机数、控制端有 `udp_port` 时，被控端不看 NAT 类型直接打洞（`rendezvous_mediator.rs` 一处 2 行），最多晚约 1 秒回落中继。不做 B（用 UDP 向两个端口各测一次，服务端多监听一个端口）和 C（不改）。
 
-**P-4 局域网候选带 IPv6（已定，按推荐）**（03 块）：ULA（`fd00::/8` 这类只在本地网络有效的地址）+ 和控制端某块物理网卡同一个 /64 前缀的全局地址，私网 IPv4 优先、全局 IPv6 优先于 ULA（控制端给 IPv6 候选晚 50~100 毫秒的先手）。理由：UU 的局域网直连实际大部分时间走以太网 IPv6，这是主路径；限定"同一个 /64"后威胁面和私网 IPv4 一样；路由器的 ULA 前缀会变，而 Porta 没有会话中换路径，所以 IPv4 优先。代价：上游 `src/server.rs` 改 1 条语句（双栈监听）、`libs/porta` 加 socket2 0.3。
+**P-4 局域网候选带 IPv6（已定，按推荐）**（03 块）：ULA（`fd00::/8` 这类只在本地网络有效的地址）+ 和控制端某块物理网卡同一个 /64 前缀的全局地址，私网 IPv4 优先、全局 IPv6 优先于 ULA（控制端给 IPv6 候选晚 50~100 毫秒的先手）。理由：UU 的局域网直连实际大部分时间走以太网 IPv6，这是主路径；限定"同一个 /64"后威胁面和私网 IPv4 一样；路由器的 ULA 前缀会变，而 Leapgate 没有会话中换路径，所以 IPv4 优先。代价：上游 `src/server.rs` 改 1 条语句（双栈监听）、`libs/leapgate` 加 socket2 0.3。
 
 网卡枚举改双地址族、`Nic` 加 IPv6 字段、`has_gateway` 拆成 `has_gateway_v4`/`has_gateway_v6`、`is_physical` 参数改成 `IpAddr`，除了 IPv6 候选，02 块测速的 `physical_snapshot` 和 04 §4.4 的 `physical_global_v6` 也要用（03 §4.1 开头）。
 
@@ -47,12 +47,12 @@
 |---|---|---|
 | 会话备注（控制端发到 `/api/audit/conn`，不带凭据） | 第三期不动，记进兼容债务 | 01 §8 |
 | `device key reset` 的写法（按安全审查改过） | 默认只清锁定、保留 uuid 和公钥；uuid 也变了时用 `--forget` 删行。原定"删行或同时写 uuid"会让 ID 在重装期间谁都能抢 | 01 §8、§3.10 |
-| `conn_attempt.a_device_id` | 不用不认证的 `porta_from_id` 填，保持"只来自令牌"的语义 | 02 §8 |
+| `conn_attempt.a_device_id` | 不用不认证的 `leapgate_from_id` 填，保持"只来自令牌"的语义 | 02 §8 |
 | 测速被代理接住时 | 只采信本地地址在物理网卡上的测量；任一公网中继快于 2 毫秒就整轮作废。路由器代答如果实测落在 2~3 毫秒，验收时把阈值提到 5 毫秒 | 02 §8 |
-| WebRTC/ICE 评估 | **已提前到第三期最前面做（维护者定）**，和 01 并行；对照基线改成现有 Porta 路径（局域网多候选 + TCP 打洞 + IPv6 打洞 + 中继）。结论决定 03、04 做不做、直连要不要改走 ICE | 04 §3.6、笔记 06 |
-| 原版和 Porta 同机共存的默认 ID 冲突 | 先在测试机上实测确认，再让 Porta 首次生成 ID 时加盐 | 03 §4.4、§8 |
+| WebRTC/ICE 评估 | **已提前到第三期最前面做（维护者定）**，和 01 并行；对照基线改成现有 Leapgate 路径（局域网多候选 + TCP 打洞 + IPv6 打洞 + 中继）。结论决定 03、04 做不做、直连要不要改走 ICE | 04 §3.6、笔记 06 |
+| 原版和 Leapgate 同机共存的默认 ID 冲突 | 先在测试机上实测确认，再让 Leapgate 首次生成 ID 时加盐 | 03 §4.4、§8 |
 | `token.device_verified` | 删掉笔记 02 预留的这一列：第三期没人读也没人写，等签名登录设计时再加。迁移 0004 只加 `peer.pk_pinned_at` | 01 §3.8 |
-| `porta_only` 开关（`docs/architecture.md` §3.1 退出机制里的"只接受 Porta 客户端"开关） | 第三期不做，挪到退出兼容时按当时的方案再加；这是推迟，不是取消。第三期的防降级只有"已锁定的 ID 拒收不签名上报"这一条 | 01 §3.5 |
+| `leapgate_only` 开关（`docs/architecture.md` §3.1 退出机制里的"只接受 Leapgate 客户端"开关） | 第三期不做，挪到退出兼容时按当时的方案再加；这是推迟，不是取消。第三期的防降级只有"已锁定的 ID 拒收不签名上报"这一条 | 01 §3.5 |
 
 ## 2. 实施顺序
 
@@ -61,19 +61,19 @@
 | 步 | 内容 |
 |---|---|
 | A | **01 服务端、01 客户端**（不同仓库，并行）；同时做 **WebRTC/ICE 评估**的读码和上游历史（笔记 06） |
-| B | 01 审查合入后做 **02**。proto 只需要 `PunchHoleRequest.porta_from_id = 1000`（加文件头号段注释），随 02 做成只含 proto 的提交，两条 porta-cardo 线各一份。02 用到的 `lan.rs` 双地址族网卡枚举和 `is_physical(IpAddr)`（原写在 03 §4.1 开头）随 02 一起做 |
+| B | 01 审查合入后做 **02**。proto 只需要 `PunchHoleRequest.leapgate_from_id = 1000`（加文件头号段注释），随 02 做成只含 proto 的提交，两条 leapgate-cardo 线各一份。02 用到的 `lan.rs` 双地址族网卡枚举和 `is_physical(IpAddr)`（原写在 03 §4.1 开头）随 02 一起做 |
 | C | WebRTC/ICE 评估的临时信令转发和实测；按结论定 03、04 |
 
 下表是评估不通过、03 和 04 照本目录实施时的完整顺序：
 
 | 步 | 内容 | 可否并行 |
 |---|---|---|
-| 0 | **一个合并的 proto 提交**：`PunchHoleRequest.porta_from_id = 1000`（string）；`PunchHole.porta_nonce = 1000`、`PunchHoleSent.porta_nonce = 1000`；UDP 出口证明的四个字段 `TestNatRequest.porta_pad = 1000`、`TestNatResponse.porta_udp_token = 1000`、`PunchHoleRequest.porta_udp_token = 1001`、`PunchHole.porta_udp_addr = 1001`（都是 bytes，04 §2.1）。文件头加注释"Porta 字段占 1000~1999"。porta-cardo 两条线（客户端线、服务端线）各放一份、内容一致，两个子模块指针一次前移 | — |
-| 1 | **01 服务端**、**01 客户端**（不同仓库）；**03**（只有客户端：`lan.rs`、`src/server.rs` 那条语句；porta-cardo 默认 ID 加盐，前置实测见 03 §4.4。03 不改服务端、不碰 `client.rs`） | 01 和 03 并行。01 客户端放 `route/mod.rs` 的空实现 |
-| 2 | **02**（含 `porta_from_id` 的客户端 2 行、服务端取 `a_id` 的 1 行、`route/mod.rs` 的真实实现和 `self_id()`）、**04**（含 UDP 出口证明），都依赖 01 的心跳 handler 和能力缓存 | 两者并行，后合者变基。02、04 的 `lan.rs` 改动都排在 03 之后；迁移 0004（01）先于 0005（02） |
-| 3 | 验收（§6），通过后把四块写回 `server/PORTA.md`、`client/PORTA.md`、`docs/architecture.md`（各块"同步清单"） | — |
+| 0 | **一个合并的 proto 提交**：`PunchHoleRequest.leapgate_from_id = 1000`（string）；`PunchHole.leapgate_nonce = 1000`、`PunchHoleSent.leapgate_nonce = 1000`；UDP 出口证明的四个字段 `TestNatRequest.leapgate_pad = 1000`、`TestNatResponse.leapgate_udp_token = 1000`、`PunchHoleRequest.leapgate_udp_token = 1001`、`PunchHole.leapgate_udp_addr = 1001`（都是 bytes，04 §2.1）。文件头加注释"Leapgate 字段占 1000~1999"。leapgate-cardo 两条线（客户端线、服务端线）各放一份、内容一致，两个子模块指针一次前移 | — |
+| 1 | **01 服务端**、**01 客户端**（不同仓库）；**03**（只有客户端：`lan.rs`、`src/server.rs` 那条语句；leapgate-cardo 默认 ID 加盐，前置实测见 03 §4.4。03 不改服务端、不碰 `client.rs`） | 01 和 03 并行。01 客户端放 `route/mod.rs` 的空实现 |
+| 2 | **02**（含 `leapgate_from_id` 的客户端 2 行、服务端取 `a_id` 的 1 行、`route/mod.rs` 的真实实现和 `self_id()`）、**04**（含 UDP 出口证明），都依赖 01 的心跳 handler 和能力缓存 | 两者并行，后合者变基。02、04 的 `lan.rs` 改动都排在 03 之后；迁移 0004（01）先于 0005（02） |
+| 3 | 验收（§6），通过后把四块写回 `server/LEAPGATE.md`、`client/LEAPGATE.md`、`docs/architecture.md`（各块"同步清单"） | — |
 
-共享文件（同一批里不要两个 coder 同时改）：服务端 `rendezvous_server.rs`（01、02、04 改，03 不改；`handle_punch_hole_request` 里 02、04 的增量基本不相邻，例外是 02 在 L1187 后加的两行紧挨 04 改的 L1188 注释，后合的一方变基时手工合）、`peer.rs`（01、04 读）、Porta 心跳 handler（01、02、04）、`conn_tracker.rs`（02、04）、`cli/`（01、02）、`udp_punch.rs`（04 独有）；客户端 `libs/porta` 的 `lib.rs`、`Cargo.toml`（01、03、04）、`route/mod.rs`（01 建空实现、02 填实）、`lan.rs`（03，之后 02、04 各加一个函数），`rendezvous_mediator.rs`（02、04）、`client.rs`（02 在 L969 后；04 在 L505、L893 后、L971 后，和 02 那处隔两行，git 能自动合并）、`common.rs`（04）。
+共享文件（同一批里不要两个 coder 同时改）：服务端 `rendezvous_server.rs`（01、02、04 改，03 不改；`handle_punch_hole_request` 里 02、04 的增量基本不相邻，例外是 02 在 L1187 后加的两行紧挨 04 改的 L1188 注释，后合的一方变基时手工合）、`peer.rs`（01、04 读）、Leapgate 心跳 handler（01、02、04）、`conn_tracker.rs`（02、04）、`cli/`（01、02）、`udp_punch.rs`（04 独有）；客户端 `libs/leapgate` 的 `lib.rs`、`Cargo.toml`（01、03、04）、`route/mod.rs`（01 建空实现、02 填实）、`lan.rs`（03，之后 02、04 各加一个函数），`rendezvous_mediator.rs`（02、04）、`client.rs`（02 在 L969 后；04 在 L505、L893 后、L971 后，和 02 那处隔两行，git 能自动合并）、`common.rs`（04）。
 
 ## 3. 改动面合计
 
@@ -81,41 +81,41 @@
 
 | 文件 | 挂钩 | 合计 |
 |---|---|---|
-| `src/client.rs`（热点） | 02：`_start_inner` 的 `PunchHoleRequest` 字面量 L969 后 +2（`porta_from_id`）；04：`_start` L505 后 +4（服务端宣告 `udp-punch` 时换成带填充、取 token 的 Porta 版 UDP NAT 测试）、`_start_inner` L893 后 +2（登录后也等 UDP NAT 测试，必须保留）、L971 后 +2（打洞请求带 token） | 4 处 10 行 |
+| `src/client.rs`（热点） | 02：`_start_inner` 的 `PunchHoleRequest` 字面量 L969 后 +2（`leapgate_from_id`）；04：`_start` L505 后 +4（服务端宣告 `udp-punch` 时换成带填充、取 token 的 Leapgate 版 UDP NAT 测试）、`_start_inner` L893 后 +2（登录后也等 UDP NAT 测试，必须保留）、L971 后 +2（打洞请求带 token） | 4 处 10 行 |
 | `src/rendezvous_mediator.rs`（热点） | 02：`get_relay_server` 开头 +4；04：`handle_punch_hole` L1101 后 +2（P-3 A）、L1151 后 +2（回带随机数）、L1153 后 +2（UDP 打洞改打 token 里的地址） | 4 处 10 行 |
 | `src/server/connection.rs`（热点） | 01：`post_audit_async` 第一行 +4 | 1 处 4 行 |
 | `src/hbbs_http/sync.rs` | 01：tick 里 `stop-service` 检查之后 +4 | 1 处 4 行 |
 | `src/server.rs` | 03：`accept_connection_` L198 改 1 条语句 + 1 行注释（双栈监听）。这是本期唯一改上游调用点的地方 | 1 处 |
 | `src/common.rs`（热点） | 04：`test_ipv6` L2775 后 +5（有物理网卡的全局 IPv6 就用它，跳过路由探测和 STUN）；UDP 打洞默认值复用已有挂钩 | 1 处 5 行 |
-| porta-cardo 客户端线 | 03：`config.rs` `get_auto_id` +2、`lib.rs` +1、新文件 `src/porta_id.rs`；步骤 0 的 proto | — |
+| leapgate-cardo 客户端线 | 03：`config.rs` `get_auto_id` +2、`lib.rs` +1、新文件 `src/leapgate_id.rs`；步骤 0 的 proto | — |
 
-每处都在"几行"以内，符合 `client/PORTA.md` §1。上游文件以外的逻辑都在 `libs/porta` 的新模块里：`api`、`report`、`sign`（01），`route`（02），`lan` 扩展（03，04 加 `physical_global_v6`），`punch`（04：带填充的 UDP NAT 测试、token 交接、UDP 打洞目标）。`libs/porta` 新依赖：`reqwest 0.12`（`default-features = false`，开 rustls 和 socks）、`serde`、`socket2 0.3`（给 `listen_dual` 用），都已在 `Cargo.lock` 里。
+每处都在"几行"以内，符合 `client/LEAPGATE.md` §1。上游文件以外的逻辑都在 `libs/leapgate` 的新模块里：`api`、`report`、`sign`（01），`route`（02），`lan` 扩展（03，04 加 `physical_global_v6`），`punch`（04：带填充的 UDP NAT 测试、token 交接、UDP 打洞目标）。`libs/leapgate` 新依赖：`reqwest 0.12`（`default-features = false`，开 rustls 和 socks）、`serde`、`socket2 0.3`（给 `listen_dual` 用），都已在 `Cargo.lock` 里。
 
 ### 3.2 服务端（硬分叉）
 
 - 新文件：`src/api/devauth.rs`（01）、`src/router/measure.rs`（02）、`src/udp_punch.rs`（04：随机数表，UDP 出口证明的签发和校验）。
 - 03 不改服务端代码；`src/auth.rs`、`src/api/ab.rs` 本期都不改（草稿里 03 的权限查询已随原第 1 项排除）。
 - 迁移：`0004_device_signing.sql`（01：`peer.pk_pinned_at`）、`0005_route_legs.sql`（02：`conn_attempt.route_a_ms`、`route_b_ms`）。03、04 不加迁移。
-- 内存状态：`Peer.pinned`、`Peer.porta_hb`（01，04 读）；防重放表（01，4096 台）；测量表（02，1 万条）；随机数表（04，4096 条，每个控制端来源 IP 最多 8 条）。都有上限。UDP 出口证明无状态，只有一把进程启动时随机生成的内存密钥（04）。
-- 新命令：`device key`、`device key reset [--forget]`（01）；`strategy set` 拒收 `porta-` 开头的键（01）；路由状态显示测量来源（02）。
+- 内存状态：`Peer.pinned`、`Peer.leapgate_hb`（01，04 读）；防重放表（01，4096 台）；测量表（02，1 万条）；随机数表（04，4096 条，每个控制端来源 IP 最多 8 条）。都有上限。UDP 出口证明无状态，只有一把进程启动时随机生成的内存密钥（04）。
+- 新命令：`device key`、`device key reset [--forget]`（01）；`strategy set` 拒收 `leapgate-` 开头的键（01）；路由状态显示测量来源（02）。
 
 ## 4. 兼容总表
 
 | 组合 | 第三期之后 |
 |---|---|
-| 原版客户端 ↔ porta-server 第三期 | 照第一期兼容路径上报，不受影响；只有被 Porta 锁定过的 ID 上的不签名上报会被拒（防降级）。原版控制端的 NAT 测试请求没有填充，拿不到 token、打洞请求也不带，同网判定照旧只比 TCP（路由器透明代理只代理 TCP 时判不出同网，和现在一样） |
-| Porta 客户端 ↔ porta-server 第三期 | 全部新功能 |
-| Porta 客户端 ↔ porta-server 第一期，或 rustdesk-api | 手动填写的地址：新路径探测回 404 → 走上游兼容路径（不签名）；构建时注入的地址视为支持、不退回，上报停掉（01 §2.5）。不测速、不开 UDP 打洞、没有 token。局域网多候选和 IPv6 候选要服务端转发 `porta_local_addrs`：已合入第三期第一项的 porta-server 照常；更早的 porta-server、或 rustdesk-api 配原版 hbbs 时被丢掉，和上游一样（03 §5） |
-| Porta 客户端 ↔ 原版 hbbs | 新 proto 字段被忽略，行为和上游一样（加第二期的改动） |
+| 原版客户端 ↔ leapgate-server 第三期 | 照第一期兼容路径上报，不受影响；只有被 Leapgate 锁定过的 ID 上的不签名上报会被拒（防降级）。原版控制端的 NAT 测试请求没有填充，拿不到 token、打洞请求也不带，同网判定照旧只比 TCP（路由器透明代理只代理 TCP 时判不出同网，和现在一样） |
+| Leapgate 客户端 ↔ leapgate-server 第三期 | 全部新功能 |
+| Leapgate 客户端 ↔ leapgate-server 第一期，或 rustdesk-api | 手动填写的地址：新路径探测回 404 → 走上游兼容路径（不签名）；构建时注入的地址视为支持、不退回，上报停掉（01 §2.5）。不测速、不开 UDP 打洞、没有 token。局域网多候选和 IPv6 候选要服务端转发 `leapgate_local_addrs`：已合入第三期第一项的 leapgate-server 照常；更早的 leapgate-server、或 rustdesk-api 配原版 hbbs 时被丢掉，和上游一样（03 §5） |
+| Leapgate 客户端 ↔ 原版 hbbs | 新 proto 字段被忽略，行为和上游一样（加第二期的改动） |
 | 控制端便携运行（服务进程没跑） | 能力缓存为空，UDP 打洞按上游默认关；不做 UDP 测试也就没有 token，同网判定只比 TCP（04 §2.5.6）；其余照常 |
-| API 用自签证书的部署 | Porta 路径只认受信任证书，又不退回上游，Porta 客户端的心跳和审计停掉（"无视接受无效证书选项"这条已定决策的直接后果）。出路：换受信任证书，或 API 用明文 HTTP 并配 Key |
-| 同一台机器装原版和 Porta、指向同一服务器 | 两边默认 ID 相同会互抢，03 块第 4 项加盐解决（先实测确认） |
+| API 用自签证书的部署 | Leapgate 路径只认受信任证书，又不退回上游，Leapgate 客户端的心跳和审计停掉（"无视接受无效证书选项"这条已定决策的直接后果）。出路：换受信任证书，或 API 用明文 HTTP 并配 Key |
+| 同一台机器装原版和 Leapgate、指向同一服务器 | 两边默认 ID 相同会互抢，03 块第 4 项加盐解决（先实测确认） |
 
 各块的细表在各自 §5。
 
 ## 5. 不配也能用：自动降级与可选优化
 
-**Porta 不要求用户配置任何代理规则。** 下表是开代理的机器上各项功能不配规则时自己会怎么做，以及配了能多拿到什么。写进 `client/PORTA.md` §8。
+**Leapgate 不要求用户配置任何代理规则。** 下表是开代理的机器上各项功能不配规则时自己会怎么做，以及配了能多拿到什么。写进 `client/LEAPGATE.md` §8。
 
 | 情况 | 不配时的自动行为 | 可选优化，配了能多拿到什么 |
 |---|---|---|
@@ -133,9 +133,9 @@
 - 服务端 `conn_attempt`：`outcome` 是对应的直连值，`relay_req_count = 0`，并且同一 `b_id`、同一时间窗里没有 `signal = 'relay_only'` 的行（多出口代理下，回落的中继请求匹配不上会另记一行）。`direct_lan` 只说明被控端回了局域网地址，不代表连上了。
 - 控制端日志：局域网看 `LAN candidate … won`、没有 `all N LAN candidates failed`；UDP、IPv6 看 `used to establish UDP connection with … punch`（`…` 是这一轮带上的传输，通常是 `UDP+TCP`）或 `used to establish IPv6 connection`，以及 `UDP NAT test to … finished: …, port=<非零>, …, success=true`（04 §6.3）。
 
-新增一条专看 UDP 出口证明（04 §6.3 第 8 条）：路由器透明代理只代理 TCP、控制端本机不开 TUN（第一阶段控制端必须是装了 Porta 的 Windows），连同一局域网的 Porta 被控端。通过的条件：`conn_attempt` 里 `signal = 'fetch_local_addr'` 且 `a_ip <> b_ip`，并满足上面的直连判据（控制端日志 `LAN candidate … won`）。
+新增一条专看 UDP 出口证明（04 §6.3 第 8 条）：路由器透明代理只代理 TCP、控制端本机不开 TUN（第一阶段控制端必须是装了 Leapgate 的 Windows），连同一局域网的 Leapgate 被控端。通过的条件：`conn_attempt` 里 `signal = 'fetch_local_addr'` 且 `a_ip <> b_ip`，并满足上面的直连判据（控制端日志 `LAN candidate … won`）。
 
-另外：02 块要 2 台以上中继（只有一台时在同机另一个端口再起一个 hbbr）；03 块第 4 项要先在 Windows 测试机上同时装原版和 Porta，确认默认 ID 冲突真的会发生；04 §6.3 第 9 条在不配任何规则的环境里测自动降级。
+另外：02 块要 2 台以上中继（只有一台时在同机另一个端口再起一个 hbbr）；03 块第 4 项要先在 Windows 测试机上同时装原版和 Leapgate，确认默认 ID 冲突真的会发生；04 §6.3 第 9 条在不配任何规则的环境里测自动降级。
 
 ## 7. 明确不做（第三期）
 
@@ -143,14 +143,14 @@
 - 会话备注改走新路径（§1.2）；心跳下发 `disconnect`、`/api/record`、`/api/switch-grant`、审计落盘队列（笔记 03 §2.7）。
 - 按两端 NAT 类型选策略、端口预测、多随机端口，先中继后升级直连，UPnP/NAT-PMP/PCP（笔记 05 §6 第 8~10 项）。
 - 会话中换路径（ICE 那样的连通性检查和切换）：交给 WebRTC/ICE 评估项决定第四期怎么做。
-- 要求用户配置代理规则；把连服务端的 socket 绑到物理网卡（`client/PORTA.md` §3.7）；按发起方 ID、设备主人或地址簿权限做同网判定（03 §2.1 已排除的方案）。
+- 要求用户配置代理规则；把连服务端的 socket 绑到物理网卡（`client/LEAPGATE.md` §3.7）；按发起方 ID、设备主人或地址簿权限做同网判定（03 §2.1 已排除的方案）。
 - UDP 出口证明的记账表（一次性使用、按来源限额）：token 无状态，重放的后果只是又一次按真实地址判定（04 §2.5.7）。
 - `RelayResponse` 那条路径不遵守固定中继的问题（第一期就有）：单独记一项，不在第三期。
-- 界面上对"连 porta-server 时本地中继设置不再生效"的提示：留给新界面轨道，第三期只写文档。
+- 界面上对"连 leapgate-server 时本地中继设置不再生效"的提示：留给新界面轨道，第三期只写文档。
 
 ## 8. 文档同步清单（确认后、实施时做）
 
-- `server/PORTA.md`：§1、§2、§3、§4.2、§6（第 2、8 条改（04）、第 7 条改（01）、第 9 条补一句（03、04）、第 10 条 = 04 的 UDP 出口证明、第 11 条 = 04 的 UDP 打洞）、§7、§8、§9、§10、§11（01）、§14、§16（01）。各块 §3 末尾有逐节说明。草稿里 03 要改的 §4.1、§12.1 和 §11 里同网判定那两句已随原第 1 项排除。
-- `client/PORTA.md`：§2 模块列表；§3 扩写（03）；新增 §4 上报与认证（01）、§5 路由第二级（02）、§6 默认 ID 加盐（03）、§7 UDP 打洞与 UDP 出口证明（04）、§8 不配也能用：自动降级与可选优化（本文 §5）。
-- `docs/architecture.md`：§3.1 兼容债务第 1 条（Porta 客户端的上报已签名，兼容路径照旧不认证）、第 3 条（客户端一半已清），并新增"会话备注不认证"一条（01 §8 第 1 项）；§3.7 第二级（"测量值放进打洞请求"改成"带发起方 ID"，连 porta-server 时本地中继设置不再生效）、§3.8（P-1 已定，并补 UDP 出口证明一句）、§5 第三期（03、04 各补一条）、§6 第 5 条、§7 第 5、7 条（§3.8、§5、§6、§7 第 7 条的写法见 04 §3.5）、§3.10 第 1 条（03）。
+- `server/LEAPGATE.md`：§1、§2、§3、§4.2、§6（第 2、8 条改（04）、第 7 条改（01）、第 9 条补一句（03、04）、第 10 条 = 04 的 UDP 出口证明、第 11 条 = 04 的 UDP 打洞）、§7、§8、§9、§10、§11（01）、§14、§16（01）。各块 §3 末尾有逐节说明。草稿里 03 要改的 §4.1、§12.1 和 §11 里同网判定那两句已随原第 1 项排除。
+- `client/LEAPGATE.md`：§2 模块列表；§3 扩写（03）；新增 §4 上报与认证（01）、§5 路由第二级（02）、§6 默认 ID 加盐（03）、§7 UDP 打洞与 UDP 出口证明（04）、§8 不配也能用：自动降级与可选优化（本文 §5）。
+- `docs/architecture.md`：§3.1 兼容债务第 1 条（Leapgate 客户端的上报已签名，兼容路径照旧不认证）、第 3 条（客户端一半已清），并新增"会话备注不认证"一条（01 §8 第 1 项）；§3.7 第二级（"测量值放进打洞请求"改成"带发起方 ID"，连 leapgate-server 时本地中继设置不再生效）、§3.8（P-1 已定，并补 UDP 出口证明一句）、§5 第三期（03、04 各补一条）、§6 第 5 条、§7 第 5、7 条（§3.8、§5、§6、§7 第 7 条的写法见 04 §3.5）、§3.10 第 1 条（03）。
 - `AGENTS.md`：第三期状态。

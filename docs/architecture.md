@@ -1,5 +1,6 @@
-# Porta 架构方案
+# Leapgate 架构方案
 
+> **名字**：Leapgate，中文名跃门，原工作名 Porta（2026-10-24 改名）。
 > **状态：已确认**。2026-10-22 和维护者逐条确认，确认结果汇总在第 7 节；开工按第 5 节分期进行。
 > **范围**：只谈抽象分层和关键取舍，不涉及部署选址。维护者 2026-10-22 定：服务端放在哪台机器以后再说，需要时另加机器。
 > **依据**：`docs/research/` 下的 7 份调研笔记，其中 01~05 读上游代码，06、07 做界面选型。文中用标注说明结论的来源：【读码】表示读代码确认，【推测】表示推断或估算，【统计】是对上游提交记录的计数，【一手来源】指官方文档和官方仓库，【旁证】指间接证据或第三方说法。所有结论都没有经过编译或实测。
@@ -30,17 +31,17 @@
 4. **Exit Node 能复用上游刚合入的多路复用端口转发**【读码】。Exit Node 指被控端充当出口节点，控制端的流量从它那里出去。上游 2026-09-05 合入了 PR #16062：每个映射对应一条会话，会话下的每条本地 TCP 连接是一个通道，带流控，默认开启。每个通道的协议字段本来就带目标 host/port，只是 `rustdesk@bd92623:src/server/port_forward_mux.rs` `fn on_open` 硬性要求它等于登录时的目标。
    - 旧的"裸管道"端口转发在登录后调用 `set_raw()` 丢掉加密器，之后以明文传输，走中继时 hbbr（中继服务器）能看到原文。
    - 端口转发只支持 TCP。
-5. **上游节奏快，改动热点正好是 Porta 要动的文件**【统计】。客户端一年 780 个提交，1~2 个月发一个版本；近 7.5 个月改得最多的是 `client.rs`、`server/connection.rs`、`rendezvous_mediator.rs`；`flutter/lib` 的 138 个文件里改了 92 个。`flutter_ffi.rs` 半年只有 22 个提交，是最稳定的边界。服务端一年约 40 个提交，基本不动。
-   - Windows 构建链的版本全部钉死：Rust 1.75、Flutter 3.24.5（打了补丁，并换成上游自己编译的引擎）、flutter_rust_bridge 1.80.1、LLVM 15、vcpkg 的一串依赖，外加虚拟显示驱动等组件。代码签名依赖上游的私有服务，Porta 用不了。
+5. **上游节奏快，改动热点正好是 Leapgate 要动的文件**【统计】。客户端一年 780 个提交，1~2 个月发一个版本；近 7.5 个月改得最多的是 `client.rs`、`server/connection.rs`、`rendezvous_mediator.rs`；`flutter/lib` 的 138 个文件里改了 92 个。`flutter_ffi.rs` 半年只有 22 个提交，是最稳定的边界。服务端一年约 40 个提交，基本不动。
+   - Windows 构建链的版本全部钉死：Rust 1.75、Flutter 3.24.5（打了补丁，并换成上游自己编译的引擎）、flutter_rust_bridge 1.80.1、LLVM 15、vcpkg 的一串依赖，外加虚拟显示驱动等组件。代码签名依赖上游的私有服务，Leapgate 用不了。
 
 ## 2. 架构总图
 
 ```mermaid
 flowchart TB
-  subgraph C["Porta 客户端（控制端和被控端是同一个程序）"]
-    UI["界面层：新界面，默认 Flutter（§3.4）<br/>（Porta 自有，不再合并上游）"]
-    FFI["接口层：flutter_ffi.rs（上游）<br/>+ porta_ffi.rs（Porta）"]
-    EXT["Porta 扩展层：libs/porta<br/>路由测量 · 出口节点 · API 客户端 · 品牌"]
+  subgraph C["Leapgate 客户端（控制端和被控端是同一个程序）"]
+    UI["界面层：新界面，默认 Flutter（§3.4）<br/>（Leapgate 自有，不再合并上游）"]
+    FFI["接口层：flutter_ffi.rs（上游）<br/>+ leapgate_ffi.rs（Leapgate）"]
+    EXT["Leapgate 扩展层：libs/leapgate<br/>路由测量 · 出口节点 · API 客户端 · 品牌"]
     ENG["引擎层（跟随上游正式版本）<br/>会话 · 被控端各服务 · 抓屏编解码 · 输入 · 剪贴板<br/>传输与加密 · 打洞 · 端口转发"]
     NATIVE["平台原生部分（跟随上游）<br/>视频纹理插件 · Android Kotlin · 驱动"]
     UI --> FFI
@@ -49,8 +50,8 @@ flowchart TB
     ENG -.->|"热点文件里只加几行挂钩"| EXT
     UI --- NATIVE
   end
-  subgraph S["Porta 服务端"]
-    subgraph CP["控制面 porta-server（单进程）"]
+  subgraph S["Leapgate 服务端"]
+    subgraph CP["控制面 leapgate-server（单进程）"]
       RV["会合模块<br/>hbbs 硬分叉"]
       API["API 模块<br/>登录 · 地址簿 · 设备 · 审计 · 策略下发"]
       RT["路由策略模块<br/>选中继 · 健康检查 · 测速汇总"]
@@ -71,15 +72,15 @@ flowchart TB
 
 - **引擎层**：上游代码原样保留，跟随上游正式版本合并。包括 `src/client.rs`、`src/client/io_loop.rs`、`src/server/`、`src/rendezvous_mediator.rs`、`libs/scrap`、`libs/enigo`、`libs/clipboard`、`libs/hbb_common`、`libs/base`。
 - **平台原生部分**：同样跟随上游。包括视频上屏用的 `texture_rgba_renderer` 和 `flutter_gpu_texture_renderer` 插件、Android 被控端的 4.2k 行 Kotlin（抓屏和无障碍输入）、虚拟显示驱动和打印机驱动。
-- **接口层**：上游的 `flutter_ffi.rs` 跟随上游；Porta 新增的导出函数全部放在独立的 `src/porta_ffi.rs` 里，不往上游文件里加。
-- **Porta 扩展层**：新建的 crate `libs/porta`，存放 Porta 自己的全部逻辑，包括中继测速、出口节点（本地 SOCKS5、出口授权和访问控制）、API 客户端和品牌配置。引擎热点文件里只加几行调用它的挂钩。
-- **界面层**：由 Porta 重写，不再合并上游的界面改动。
+- **接口层**：上游的 `flutter_ffi.rs` 跟随上游；Leapgate 新增的导出函数全部放在独立的 `src/leapgate_ffi.rs` 里，不往上游文件里加。
+- **Leapgate 扩展层**：新建的 crate `libs/leapgate`，存放 Leapgate 自己的全部逻辑，包括中继测速、出口节点（本地 SOCKS5、出口授权和访问控制）、API 客户端和品牌配置。引擎热点文件里只加几行调用它的挂钩。
+- **界面层**：由 Leapgate 重写，不再合并上游的界面改动。
 
 ### 2.2 服务端分控制面和数据面
 
-- **控制面**是一个进程 `porta-server`，内部分四个模块：会合（hbbs 硬分叉，负责设备注册、打洞信令和选中继）、API（替代 rustdesk-api）、路由策略（选中继的依据和算法）、存储（SQLite）。
+- **控制面**是一个进程 `leapgate-server`，内部分四个模块：会合（hbbs 硬分叉，负责设备注册、打洞信令和选中继）、API（替代 rustdesk-api）、路由策略（选中继的依据和算法）、存储（SQLite）。
 - **数据面**是多台原版 hbbr，只统一配置 `-k` 密钥和限速参数，不改代码。
-- 现有部署里的 Headscale 和 derper 不属于 Porta，只在"全局出口"模式（§3.9）里作为外部依赖出现。
+- 现有部署里的 Headscale 和 derper 不属于 Leapgate，只在"全局出口"模式（§3.9）里作为外部依赖出现。
 
 ### 2.3 三个新能力挂在哪一层
 
@@ -93,27 +94,27 @@ flowchart TB
 
 ### 3.1 兼容原版 RustDesk 客户端
 
-- **决定**（维护者 2026-10-22 确认）：Porta 服务端在最初几个版本里兼容原版 RustDesk 客户端，会合协议（protobuf）和 HTTP API 的约定都照旧，新能力只做加法（新增 proto 字段和 API 字段，原版客户端会忽略它们）。兼容只是过渡手段：为兼容付出的代价（下文的"兼容债务"）要在几个迭代内移除和修复，不长期背着。
+- **决定**（维护者 2026-10-22 确认）：Leapgate 服务端在最初几个版本里兼容原版 RustDesk 客户端，会合协议（protobuf）和 HTTP API 的约定都照旧，新能力只做加法（新增 proto 字段和 API 字段，原版客户端会忽略它们）。兼容只是过渡手段：为兼容付出的代价（下文的"兼容债务"）要在几个迭代内移除和修复，不长期背着。
 - **为什么先兼容**：
   - 服务端可以先做、先上线，用现有的原版客户端验证，不用等 Windows 构建链搭好。
-  - 旧设备不必一次全部换成 Porta 客户端。
+  - 旧设备不必一次全部换成 Leapgate 客户端。
   - 出问题时可以拿原版客户端对照，分清是服务端还是客户端的错。
 - **兼容债务清单**（兼容期内允许存在，退出时逐条清掉）：
-  1. 设备上报接口（心跳、sysinfo、审计）不强制认证，只靠 body 里的 `id` 和 `uuid` 识别设备【读码】。退出后强制设备签名。第三期起 Porta 客户端的上报改走 `/api/porta/v1/` 并签名，被锁定公钥的设备不再接受不签名的上报；兼容路径对原版客户端照旧不认证（`docs/第三期实施契约/01-上报与认证.md`）。
-  6. 会话备注（连接结束后填写的备注）仍经兼容接口发送、不认证，Porta 客户端也一样（契约 01 §8 第 1 项）。
-  2. 客户端靠 8 个固定约定判断服务端能力，例如接口返回 404 表示不支持、sysinfo 回纯文本 `SYSINFO_UPDATED` 等（见 `docs/research/03` §7.4）。退出后换成正式的能力协商：Porta API 带版本号，客户端先问服务端支持什么。
-  3. 被控端"本地中继优先"的旧规则，以及服务端经心跳下发、清空 `relay-server` 的变通做法（§3.7）。Porta 客户端改成服务端下发值优先之后，删掉这个变通。客户端一半已由第三期的 `get_relay_server` 挂钩清掉（Porta 被控端连 porta-server 时服务端下发值优先，契约 02）；服务端经心跳清空 `relay-server` 的变通仍为原版被控端保留。
-  4. 旧的裸管道端口转发（登录后明文）。Porta 被控端直接拒绝它（§3.9），不用等兼容期结束。
-  5. 只为照顾原版客户端才有的接口形态，例如审计接口"成功时回空 body"、地址簿靠 404 回退旧版。这些随正式的 Porta API 一起重新设计。
+  1. 设备上报接口（心跳、sysinfo、审计）不强制认证，只靠 body 里的 `id` 和 `uuid` 识别设备【读码】。退出后强制设备签名。第三期起 Leapgate 客户端的上报改走 `/api/leapgate/v1/` 并签名，被锁定公钥的设备不再接受不签名的上报；兼容路径对原版客户端照旧不认证（`docs/第三期实施契约/01-上报与认证.md`）。
+  6. 会话备注（连接结束后填写的备注）仍经兼容接口发送、不认证，Leapgate 客户端也一样（契约 01 §8 第 1 项）。
+  2. 客户端靠 8 个固定约定判断服务端能力，例如接口返回 404 表示不支持、sysinfo 回纯文本 `SYSINFO_UPDATED` 等（见 `docs/research/03` §7.4）。退出后换成正式的能力协商：Leapgate API 带版本号，客户端先问服务端支持什么。
+  3. 被控端"本地中继优先"的旧规则，以及服务端经心跳下发、清空 `relay-server` 的变通做法（§3.7）。Leapgate 客户端改成服务端下发值优先之后，删掉这个变通。客户端一半已由第三期的 `get_relay_server` 挂钩清掉（Leapgate 被控端连 leapgate-server 时服务端下发值优先，契约 02）；服务端经心跳清空 `relay-server` 的变通仍为原版被控端保留。
+  4. 旧的裸管道端口转发（登录后明文）。Leapgate 被控端直接拒绝它（§3.9），不用等兼容期结束。
+  5. 只为照顾原版客户端才有的接口形态，例如审计接口"成功时回空 body"、地址簿靠 404 回退旧版。这些随正式的 Leapgate API 一起重新设计。
 - **债务分服务端和客户端两半**：
   - 服务端一半：关开关、删代码即可。服务端是硬分叉（§3.2），删起来没有合并负担。
-  - 客户端一半：Porta 客户端本身也继承了上游的这套调用代码，Rust 一侧是 `rustdesk@bd92623:src/hbbs_http/sync.rs`，Dart 一侧是 `flutter/lib/models/ab_model.dart` 等。要清掉它们，Porta 客户端得改用 `libs/porta` 里的新 API 客户端：Dart 那部分随新界面重写一起换掉；Rust 那部分在 `sync.rs` 里加挂钩，把上游的调用关掉而不是删掉，因为删上游代码会让每次合并都冲突。
+  - 客户端一半：Leapgate 客户端本身也继承了上游的这套调用代码，Rust 一侧是 `rustdesk@bd92623:src/hbbs_http/sync.rs`，Dart 一侧是 `flutter/lib/models/ab_model.dart` 等。要清掉它们，Leapgate 客户端得改用 `libs/leapgate` 里的新 API 客户端：Dart 那部分随新界面重写一起换掉；Rust 那部分在 `sync.rs` 里加挂钩，把上游的调用关掉而不是删掉，因为删上游代码会让每次合并都冲突。
 - **退出机制**：
-  1. 服务端从第一期起记录每台设备的客户端类型和版本（sysinfo 上报里带版本号），命令行能列出还在用原版客户端或旧版 Porta 的设备。
-  2. 退出看状态，不看日期：条件是维护者的设备全部换成支持新 API 和设备签名的 Porta 客户端。
-  3. 分两步退出：先在服务端打开"只接受 Porta 客户端"开关，出问题能马上关回去；稳定一个版本后，再删掉服务端的兼容代码和这个开关本身。
+  1. 服务端从第一期起记录每台设备的客户端类型和版本（sysinfo 上报里带版本号），命令行能列出还在用原版客户端或旧版 Leapgate 的设备。
+  2. 退出看状态，不看日期：条件是维护者的设备全部换成支持新 API 和设备签名的 Leapgate 客户端。
+  3. 分两步退出：先在服务端打开"只接受 Leapgate 客户端"开关，出问题能马上关回去；稳定一个版本后，再删掉服务端的兼容代码和这个开关本身。
   4. 预计窗口：第一期开始兼容；第三期（设备签名、上报接口改走新 API）和新界面轨道（Dart 里的 HTTP 调用下沉）都完成后具备退出条件，之后在一个版本内删干净。
-- **退出之后**：原版 RustDesk 客户端连不上 Porta 服务端。客户端之间的点对点协议仍跟随上游引擎，不在这次清理范围内，那部分归 §3.2 管。
+- **退出之后**：原版 RustDesk 客户端连不上 Leapgate 服务端。客户端之间的点对点协议仍跟随上游引擎，不在这次清理范围内，那部分归 §3.2 管。
 - **没选的备选**：
   - 永久兼容：债务一直背着，上报接口永远没有强制认证。
   - 一开始就不兼容：第一期就得服务端和客户端一起做、一起测，Windows 构建链成了第一道关，所有设备也得同时切换。
@@ -123,25 +124,25 @@ flowchart TB
 - **决定**：客户端跟随上游正式版本合并，服务端硬分叉。维护者 2026-10-22 确认仓库布局时对这一条没有异议，按推荐方案记为已定。
 - **客户端怎么合并上游**：
   - 每个上游正式版本（tag）合并一次，不追每个提交，正式版发布后两周内合完；安全修复不等版本，随时摘取。上游 1~2 个月发一个正式版，1.4.9 到 1.5.0 之间有 273 个提交，1.5.0 发布后三周内又有 61 个【统计】。
-  - 用 `git merge`，不用 rebase。rebase 要把 Porta 的提交在每个上游版本上重放一遍并改写历史，不适合长期维护的 fork。
+  - 用 `git merge`，不用 rebase。rebase 要把 Leapgate 的提交在每个上游版本上重放一遍并改写历史，不适合长期维护的 fork。
   - 合并能带进来引擎和各平台的修复、安全修复和新功能。现成的例子是 Exit Node 要用的多路复用端口转发，它是 2026-09 上游才合入的。
   - 界面层不合并（新界面放在独立目录，见 §3.3），引擎层和平台原生部分合并。靠 §3.3 的改动纪律，冲突能压到挂钩那几行，再加上每次都会冲突、但能机械处理的 `Cargo.toml` 和 `Cargo.lock`。每次合并估计要 1~3 人日【推测】，一年 6~8 次，可以派 agent 做。
   - 如果第 7 节第 6 条说的原型做完之后换成 Slint，合并方式不变，只是分界线从 `flutter_ffi.rs` 挪到引擎里那约 20 处 `cfg(feature="flutter")` 调用，另加一个新的界面适配层（像当年的 Sciter 那样实现 `InvokeUiSession`），挂钩会多一些。
-- **服务端为什么硬分叉**：服务端一年约 40 个提交，大多是安全修补。Porta 要往里加 API 和路由模块，还要按 §3.1 逐步删掉兼容代码，改动又深又广，本来就合并不了。跟进方式是定期看上游 release，有安全修复就手工摘取（cherry-pick）。
+- **服务端为什么硬分叉**：服务端一年约 40 个提交，大多是安全修补。Leapgate 要往里加 API 和路由模块，还要按 §3.1 逐步删掉兼容代码，改动又深又广，本来就合并不了。跟进方式是定期看上游 release，有安全修复就手工摘取（cherry-pick）。
 - **仓库布局**（维护者 2026-10-22 确认）：一个总仓库加三个代码仓库，全部公开，都是 AGPL-3.0。
-  - `Porta`（本仓库，总仓库）：放方案和决策文档、给 agent 的说明、跨仓库的构建和发版脚本。用子模块把 `client/` 挂到 `porta-client`、`server/` 挂到 `porta-server`，这样总仓库的一次提交就记下了"哪个客户端版本配哪个服务端版本"。
-  - `porta-client`：rustdesk/rustdesk 的 fork，保留完整历史，`upstream` remote 指向官方仓库。合并上游就是在这里执行 `git merge <上游 tag>`。
-  - `porta-server`：rustdesk/rustdesk-server 的 fork，保留完整历史。它是硬分叉，摘取上游修复直接用 `git cherry-pick`。
-  - `porta-cardo`：hbb_common 的 fork。这个 fork 必须要有：默认服务器 `RENDEZVOUS_SERVERS = ["rs-ny.rustdesk.com"]` 和公钥 `RS_PUB_KEY` 是 `rustdesk@bd92623:libs/hbb_common/src/config.rs` 里的编译期常量【读码】，不改的话，Porta 客户端在没配服务器时会连到 RustDesk 官方；`rendezvous.proto` 的新字段也在这里加。
-    - 它挂在 `porta-client` 和 `porta-server` 各自原来的 `libs/hbb_common` 子模块位置上，总仓库不再单独挂一份，免得同一个库有三处版本指针、各指各的。
+  - `Leapgate`（本仓库，总仓库）：放方案和决策文档、给 agent 的说明、跨仓库的构建和发版脚本。用子模块把 `client/` 挂到 `leapgate-client`、`server/` 挂到 `leapgate-server`，这样总仓库的一次提交就记下了"哪个客户端版本配哪个服务端版本"。
+  - `leapgate-client`：rustdesk/rustdesk 的 fork，保留完整历史，`upstream` remote 指向官方仓库。合并上游就是在这里执行 `git merge <上游 tag>`。
+  - `leapgate-server`：rustdesk/rustdesk-server 的 fork，保留完整历史。它是硬分叉，摘取上游修复直接用 `git cherry-pick`。
+  - `leapgate-cardo`：hbb_common 的 fork。这个 fork 必须要有：默认服务器 `RENDEZVOUS_SERVERS = ["rs-ny.rustdesk.com"]` 和公钥 `RS_PUB_KEY` 是 `rustdesk@bd92623:libs/hbb_common/src/config.rs` 里的编译期常量【读码】，不改的话，Leapgate 客户端在没配服务器时会连到 RustDesk 官方；`rendezvous.proto` 的新字段也在这里加。
+    - 它挂在 `leapgate-client` 和 `leapgate-server` 各自原来的 `libs/hbb_common` 子模块位置上，总仓库不再单独挂一份，免得同一个库有三处版本指针、各指各的。
     - 服务端的 hbb_common 现在比客户端落后约 120 个提交，要先升到和客户端相同的版本，以后两边共用这一个 fork，保证会合协议的字段一致。这次升级需要做一些适配【推测】。
     - 只改仓库名，不改 crate 名：代码里仍叫 `hbb_common`，目录也还是 `libs/hbb_common`。上游代码里到处是 `use hbb_common::…`，改 crate 名会让每次合并都冲突。
     - 名字来历：cardo 是拉丁语的"门枢"，门靠它转动，一头连着门、一头连着门框，正好对应客户端和服务端共用的这一块；罗马城的南北主街也叫 cardo。维护者 2026-10-22 定名。
-  - `porta-client` 里上游的 `AGENTS.md` 保留不改，它讲的是上游代码的约定，对写代码的 agent 有用；上游的 `CLAUDE.md` 只有一行 `@AGENTS.md`，也不动。Porta 自己的说明放在 `PORTA.md`，在上游 `AGENTS.md` 开头加一行指过去；只改一行，几乎不会冲突。`porta-server` 同理。
+  - `leapgate-client` 里上游的 `AGENTS.md` 保留不改，它讲的是上游代码的约定，对写代码的 agent 有用；上游的 `CLAUDE.md` 只有一行 `@AGENTS.md`，也不动。Leapgate 自己的说明放在 `LEAPGATE.md`，在上游 `AGENTS.md` 开头加一行指过去；只改一行，几乎不会冲突。`leapgate-server` 同理。
 - **公开内容和内部内容分开**（维护者 2026-10-22 确认）：公开仓库里只放适合开源的通用内容。现网部署、立项讨论、待办这类内部文档放在独立的私有仓库里，检出在总仓库的 `internal/` 目录下，被公开仓库排除，不进公开历史；公开文档提到现网时只写抽象描述。总仓库公开之前，要用脱敏后的内容重建历史，因为早期提交里还带着内部信息。
 - **没选的备选**：
   - 三个仓库，服务端源码直接放进总仓库的 `server/`：少一个仓库，但上游的子模块要挪到总仓库根目录，摘取上游修复时要带 `-X subtree=server`。
-  - 补丁队列：把 Porta 的改动维护成一组补丁，每个上游版本重新打一遍（Ungoogled Chromium 的做法）。改了哪些一目了然，但补丁队列更适合"改动小而散"的情形，而 Porta 有大块新代码（新界面、`libs/porta`）。
+  - 补丁队列：把 Leapgate 的改动维护成一组补丁，每个上游版本重新打一遍（Ungoogled Chromium 的做法）。改了哪些一目了然，但补丁队列更适合"改动小而散"的情形，而 Leapgate 有大块新代码（新界面、`libs/leapgate`）。
   - 攒几个版本再合并：冲突随版本距离变大，越拖越难合。
   - 本仓库直接变成 rustdesk 的 fork（根目录就是客户端源码）：少一个仓库，但上游根目录自带 `AGENTS.md`（232 行，上游持续在改）和 `CLAUDE.md`，本项目的 `AGENTS.md` 没地方放；服务端也还得另找地方放。
   - 客户端也硬分叉：之后不再付合并成本，但抓屏、编解码、各平台兼容这些持续的修复都要自己摘取，一年几百个提交，个人项目跟不上。
@@ -150,8 +151,8 @@ flowchart TB
 
 以后所有客户端改动都按下面几条执行。
 
-- 上游热点文件（`src/client.rs`、`src/client/io_loop.rs`、`src/server/connection.rs`、`src/server/port_forward_mux.rs`、`src/rendezvous_mediator.rs`、`src/common.rs`）里只加几行调用 `porta::…` 的挂钩，逻辑放在 `libs/porta`。
-- 新的 FFI 函数只放在 `src/porta_ffi.rs`。
+- 上游热点文件（`src/client.rs`、`src/client/io_loop.rs`、`src/server/connection.rs`、`src/server/port_forward_mux.rs`、`src/rendezvous_mediator.rs`、`src/common.rs`）里只加几行调用 `leapgate::…` 的挂钩，逻辑放在 `libs/leapgate`。
+- 新的 FFI 函数只放在 `src/leapgate_ffi.rs`。
 - 上游的 `flutter/` 目录原样不动，新界面就绪后不再构建。新界面放在独立目录，有自己的工程文件和各平台启动代码，品牌改动也在那里做。如果直接改 `flutter/lib`，上游每次改这些文件都会冲突（近 7.5 个月 138 个文件改了 92 个）。不论最后用 Flutter 还是 Slint，都按这条办。
   - 过渡期例外：新界面就绪之前，客户端只能用上游现有的界面，所以第二期照旧构建上游的 `flutter/`，只在里面做最少的品牌改动（exe 名、图标、包 ID），接受这几处在合并时冲突，新界面就绪后停用。
 - 要停用上游代码时，用挂钩关掉，不删文件。删掉的文件上游一改就冲突。
@@ -164,14 +165,14 @@ flowchart TB
 依据是 `docs/research/01`、`06`（9 个框架的横向比较）和 `07`（RustDesk 自己在 Flutter 上的经历）。
 
 - **决定**（维护者 2026-10-22 确认）：默认留在 Flutter。新界面轨道开工前做 3~5 天的 Slint 原型，按下文"怎么定"里的三条标准判断换不换。不支持 Windows 7。留 Flutter 时的多窗口做法，等原型结果出来再定。
-- **结论**：现在不值得换。RustDesk 在 Flutter 上的包袱大多来自它自己的两个决定，Porta 留在 Flutter 也能甩掉。唯一值得认真考虑的替代是 Slint，用一个限时原型来决定，而且只有在桌面优先时才值得换。
+- **结论**：现在不值得换。RustDesk 在 Flutter 上的包袱大多来自它自己的两个决定，Leapgate 留在 Flutter 也能甩掉。唯一值得认真考虑的替代是 Slint，用一个限时原型来决定，而且只有在桌面优先时才值得换。
 - **先说清三件事**：
   1. 换框架换不来现代化设计。RustDesk 看着旧，是设计和写法的问题，Flutter 本身做得出现代界面。
   2. 换框架解决不了用户抱怨最多的几类问题：Wayland（GitHub 上搜到约 227 条）、输入法（约 88 条）、编解码。它们绝大多数出在 Rust 引擎层或 RustDesk 自己的键盘映射逻辑里【旁证：issue 搜索，2026-10-22】。
   3. RustDesk 的 Flutter 包袱大多来自它自己的两个决定【读码 + 一手来源】：
      - 支持 Windows 7：为此桌面端钉在 Flutter 3.24.5 和 Rust 1.75，自己编译 Flutter 引擎做 Win7 兼容回退，还给 SDK 打补丁；Windows arm64 又单独用新版 Flutter，两套版本并存（rustdesk PR #15139）。
      - 每个窗口一个 Flutter engine：自编引擎里的另一处补丁，就是为了绕开多 engine 多窗口的崩溃（flutter#155685，至今 open）；`desktop_multi_window`、`window_manager` 两个插件都是分叉维护的。
-     - Porta 不支持 Win7、换一种多窗口做法，这些包袱都可以甩掉。
+     - Leapgate 不支持 Win7、换一种多窗口做法，这些包袱都可以甩掉。
 - **只有换框架才能解决的问题**（Flutter 本身的问题）：
   - 白窗、黑窗一类的 GPU 兼容问题：rustdesk#5108 有 119 条评论，维护者多次回复"无能为力，等 Flutter 修"，对应的 flutter#159630 仍是 open【一手来源】。
   - 桌面原生能力要靠插件补：多级菜单、原生光标、窗口行为。
@@ -181,7 +182,7 @@ flowchart TB
 - **换框架多花的成本**：新界面本来就要重写约 45~50k 行，这部分两条路都要花。换框架额外多出来的是：
   - 视频上屏：上游已经为 Flutter 做好了，包括在 Windows 上把 D3D11 纹理零拷贝交给 Flutter。换框架要重做。
   - 多窗口机制。
-  - 约 20k 行 Dart 业务逻辑改写成 Rust（其中 HTTP 部分本来就计划下沉到 `libs/porta`）。
+  - 约 20k 行 Dart 业务逻辑改写成 Rust（其中 HTTP 部分本来就计划下沉到 `libs/leapgate`）。
   - 9 个分叉或自写的 Flutter 插件（约 11k 行原生代码）要找替代。
   - 引擎里约 20 处 `cfg(feature="flutter")` 调用要抽成中立模块。
   - Android 上现有的 Kotlin 抓屏和输入代码要和新框架重新衔接。
@@ -197,7 +198,7 @@ flowchart TB
   - Tauri（WebView）在视频上屏这一条不过关，RustDesk 当年放弃 Tauri 也是卡在这里（rustdesk#533）。egui、Iced 不擅长精致界面，移动端也基本没有。GPUI、Dioxus、Compose 各有硬伤，见 `docs/research/06`。
   - Slint 的风险：wgpu 纹理导入挂在 `unstable-wgpu-NN` 特性开关后面，只收 `Rgba8Unorm` 格式；iOS 支持还在打磨【一手来源】。开源版许可证是 GPLv3，可以和 AGPL-3.0 一起分发【推测，按许可证文本】。
 - **怎么定**：
-  - 默认留 Flutter：新界面不支持 Win7，用新的 Flutter stable 和新版 Rust，去掉自编引擎和 SDK 补丁（第二期过渡期编上游现有界面时用哪个版本另说，见 §3.11）。界面做薄，业务逻辑放进 `libs/porta`，这样以后不论换不换都受益。
+  - 默认留 Flutter：新界面不支持 Win7，用新的 Flutter stable 和新版 Rust，去掉自编引擎和 SDK 补丁（第二期过渡期编上游现有界面时用哪个版本另说，见 §3.11）。界面做薄，业务逻辑放进 `libs/leapgate`，这样以后不论换不换都受益。
   - Slint 原型在新界面轨道开工前做，限时 3~5 天，和第一、二期并行，不挡任何事。通过标准有三条：
     1. 用真实的解码输出跑 1080p60 和 4K60。
     2. Windows 硬解路径要做通零拷贝。hwcodec 在 GPU 上把解码出的 NV12 转成 BGRA，交出来的是 `DXGI_FORMAT_B8G8R8A8_UNORM` 格式的 D3D11 纹理（`rustdesk-org/hwcodec@ec38eba:cpp/common/platform/win/win.cpp` `NativeDevice::nv12_to_bgra_set_rtv`）【读码】，而 Slint 只收 `Rgba8Unorm` 的 wgpu 纹理。所以原型要做通"把 D3D11 纹理共享给 wgpu"，再加一步通道换序（或者改 hwcodec 的着色器直接输出 RGBA），全程不回到 CPU。这一步成立才算通过。
@@ -214,16 +215,16 @@ flowchart TB
 
 ### 3.5 服务端形态
 
-- **决定**（维护者 2026-10-22 确认）：服务端是一个 Rust 进程 `porta-server`，由 hbbs 硬分叉而来，内置 HTTP API 模块和路由策略模块，存储用 SQLite（hbbs 本来就用 sqlx + SQLite，见 `rustdesk-server@873230e:src/database.rs`【读码】）。hbbr 用原版。第一期只用命令行管理。
+- **决定**（维护者 2026-10-22 确认）：服务端是一个 Rust 进程 `leapgate-server`，由 hbbs 硬分叉而来，内置 HTTP API 模块和路由策略模块，存储用 SQLite（hbbs 本来就用 sqlx + SQLite，见 `rustdesk-server@873230e:src/database.rs`【读码】）。hbbr 用原版。第一期只用命令行管理。
   - 合成一个进程的理由：API 要用到 hbbs 手里的在线状态和设备公钥；心跳下发的策略要用到路由模块的数据；部署和运维只有一个程序。
   - 进程内部按模块分开（会合、API、路由、存储），以后真要拆成多个进程，成本也不高。
 - **内部四个模块**：会合（hbbs 原有代码，负责设备注册、打洞信令和选中继）、API（HTTP，替代 rustdesk-api）、路由策略（中继列表、健康检查、按 IP 库估算延迟选中继，以后加测速汇总）、存储（SQLite）。模块之间在进程内直接调用。
-- **端口和 HTTPS**：沿用 hbbs 原来的端口，API 用 21114。HTTPS 交给前面的反向代理，`porta-server` 自己不管证书。
-- **会合端口的 TCP 密钥交换**（2026-10-22 开工后读码确认，第一期必须做）：`porta-server` 在会合端口的 TCP 连接建立后先发 `KeyExchange`，完成握手后再收发信令。原版 hbbs 连上后不发 `KeyExchange`；而客户端配了服务器公钥、又登录过 API 时，连接流程要求先完成这个握手，等 18 秒超时后报 "Failed to secure tcp"，整次连接失败，1.5.0 正式版也一样【读码】。不做的话，用户一登录就连不上任何设备。实现用 hbb_common 现有的 v1 握手，细节见 `docs/research/第一期服务端/02` §6.2。lejianwen 在自己 fork 的 hbbs 里修过"API 连接超时"，很可能就是这个问题【推测】。
+- **端口和 HTTPS**：沿用 hbbs 原来的端口，API 用 21114。HTTPS 交给前面的反向代理，`leapgate-server` 自己不管证书。
+- **会合端口的 TCP 密钥交换**（2026-10-22 开工后读码确认，第一期必须做）：`leapgate-server` 在会合端口的 TCP 连接建立后先发 `KeyExchange`，完成握手后再收发信令。原版 hbbs 连上后不发 `KeyExchange`；而客户端配了服务器公钥、又登录过 API 时，连接流程要求先完成这个握手，等 18 秒超时后报 "Failed to secure tcp"，整次连接失败，1.5.0 正式版也一样【读码】。不做的话，用户一登录就连不上任何设备。实现用 hbb_common 现有的 v1 握手，细节见 `docs/research/第一期服务端/02` §6.2。lejianwen 在自己 fork 的 hbbs 里修过"API 连接超时"，很可能就是这个问题【推测】。
 - **HTTP 框架**：axum，和 hbbs 已经在用的 tokio 属于同一个生态。
 - **hbbr**：不改代码，所有中继统一配置同一个 `-k` 密钥。默认不校验密钥时，谁都能拿它当免费中继【读码】。
-- **只跑一份，不做高可用**：`porta-server` 挂掉时，已建立的连接不受影响（连接建好后数据不再经过 hbbs）【推测】，但新连接、登录和地址簿不可用。个人使用可以接受。
-- **管理后台**：第一期不做 Web 后台，管理操作走 `porta-server` 的命令行子命令，包括加用户、改密码、管理用户组、建共享地址簿并分配成员和权限（§3.6）、列出设备（带客户端类型和版本，§3.1 退出兼容时要用）、从 rustdesk-api 导入数据、查看中继状态、给设备下发策略。日常的地址簿编辑在客户端里做。以后真需要网页后台，再做一个小页面，不复刻 rustdesk-api 的约 120 个 `/api/admin/*` 接口。
+- **只跑一份，不做高可用**：`leapgate-server` 挂掉时，已建立的连接不受影响（连接建好后数据不再经过 hbbs）【推测】，但新连接、登录和地址簿不可用。个人使用可以接受。
+- **管理后台**：第一期不做 Web 后台，管理操作走 `leapgate-server` 的命令行子命令，包括加用户、改密码、管理用户组、建共享地址簿并分配成员和权限（§3.6）、列出设备（带客户端类型和版本，§3.1 退出兼容时要用）、从 rustdesk-api 导入数据、查看中继状态、给设备下发策略。日常的地址簿编辑在客户端里做。以后真需要网页后台，再做一个小页面，不复刻 rustdesk-api 的约 120 个 `/api/admin/*` 接口。
 - **数据迁移**：写一次性脚本，从现有 rustdesk-api 的 SQLite 导入用户、用户组和地址簿。
 - **没选的备选**：
   - 原版 hbbs 加独立的 API 服务（现有部署的形态）：API 看不到在线状态，只能通过 hbbs 的本机控制端口发命令；智能选中继照样要改 hbbs。
@@ -238,17 +239,17 @@ flowchart TB
   - 设备：sysinfo 回 `SYSINFO_UPDATED`；heartbeat 回带 `strategy` 的响应；组面板用的 `users` 和 `peers`。
   - 审计：conn 和 file 两个接口，成功时回空 body，按 `nonce` 去重。rustdesk-api 在这里回的是 JSON，客户端会当成失败，再重试两次。
   - 客户端用来判断服务端能力的那 8 个约定值，兼容期内原样保留（`docs/research/03` §7.4），退出兼容时换成正式的能力协商（§3.1）。
-- **心跳策略作为配置下发通道**：服务端可以给每台设备下发任意选项【读码】。智能路由（清掉本地写死的中继）、以后 Porta 自己的设置都走这条通道，不另开接口。它写的是被控服务进程的 Config，改不到只有控制端用户进程才读的 LocalConfig 选项，所以打不开 IPv6 打洞和 UDP 打洞（2026-10-22 开工后读码更正，见 §3.8）。
+- **心跳策略作为配置下发通道**：服务端可以给每台设备下发任意选项【读码】。智能路由（清掉本地写死的中继）、以后 Leapgate 自己的设置都走这条通道，不另开接口。它写的是被控服务进程的 Config，改不到只有控制端用户进程才读的 LocalConfig 选项，所以打不开 IPv6 打洞和 UDP 打洞（2026-10-22 开工后读码更正，见 §3.8）。
 - **账号模型**：本地账号加密码（argon2 哈希），用户只有维护者和几个朋友。TOTP 以后再加，OIDC 第一期不做。
-- **设备认证**：按 §3.1，Porta 客户端用设备私钥签名，由服务端的开关决定是否还接受不签名的请求。
-- **客户端侧**：第一期不动客户端里的 API 调用（协议兼容）。做新界面时，把登录、地址簿、设备组的 HTTP 调用从 Dart 下沉到 `libs/porta`，经 `porta_ffi.rs` 提供给界面，之后界面只管显示。
+- **设备认证**：按 §3.1，Leapgate 客户端用设备私钥签名，由服务端的开关决定是否还接受不签名的请求。
+- **客户端侧**：第一期不动客户端里的 API 调用（协议兼容）。做新界面时，把登录、地址簿、设备组的 HTTP 调用从 Dart 下沉到 `libs/leapgate`，经 `leapgate_ffi.rs` 提供给界面，之后界面只管显示。
 - **地址簿只做新版**（维护者 2026-10-22 确认）：
   - 新版是一本个人地址簿加多本共享地址簿，共享簿分只读、读写、完全控制三级权限，改动按条增量提交【读码】。客户端先试新版接口，服务端回 404 才退回旧版，所以实现了新版，就不需要旧版的两个接口。但 1.4.7 起 `/api/ab/personal` 回 `null` 时客户端不会退回旧版，而是报错并停止拉取，所以服务端对已登录用户必须永远回个人簿的 guid【读码】（`docs/research/第一期服务端/04` §1.5）。
   - 数据按"多本加权限"建模，原版客户端用的 12 个接口只是套在上面的兼容外壳；§3.1 退出兼容时换掉外壳，表结构不用改。
   - 权限的含义（维护者 2026-10-22 定）："读写"可以增删改簿内的设备和标签，包括删除；"完全控制"在客户端接口里和读写相同，多出来的管理簿本身（改名、成员）走命令行。原因是客户端对读写和完全控制显示同样的菜单【读码】，如果照搬 rustdesk-api"删除要完全控制"的规则，读写用户会看到删除菜单，点了却报错。
   - 共享簿里的设备密码由客户端明文上传；个人簿存的是密码哈希 `base64(sha256(明文+salt))`，客户端直接拿它登录对端，等同明文【读码】。两者都由服务端加密后再落盘，防止数据库文件和备份泄露；服务端的运维者本人仍能解开。个人簿哈希加密落盘是 2026-10-22 补定的。
   - 客户端不能新建共享簿、分配权限【推测】，这些操作走命令行（§3.5）。
-  - 用户组（维护者 2026-10-22 定）：Porta 也做用户组，共享簿可以授权给组，组成员变动后权限跟着变；组的管理走命令行。组面板里，同在一个"共享设备"组里的成员互相看得到对方的用户和设备，对应 rustdesk-api 的共享组（`groups.type=2`，`docs/research/第一期服务端/05` §2.2）。
+  - 用户组（维护者 2026-10-22 定）：Leapgate 也做用户组，共享簿可以授权给组，组成员变动后权限跟着变；组的管理走命令行。组面板里，同在一个"共享设备"组里的成员互相看得到对方的用户和设备，对应 rustdesk-api 的共享组（`groups.type=2`，`docs/research/第一期服务端/05` §2.2）。
   - 新版模式下客户端有"在 Web 控制台管理"菜单，点开会打开 API 根路径；第一期在那里放一个静态说明页。
   - 每本地址簿的设备数上限给"不限"。从 rustdesk-api 迁移时，个人簿、共享簿、标签、用户组和组规则一起导入；个人簿的密码哈希格式不变，加密存。
 
@@ -272,10 +273,10 @@ flowchart TB
   - 健康检查从"能不能连上"扩展为顺带记录 hbbs 到各中继的 RTT。
   - **前提一**：被控端的 `relay-server` 要留空。现有部署里至少有一台被控端在本地写死了中继。解决办法是服务端在心跳的 `strategy.config_options` 里下发 `relay-server` 空值：`fn handle_config_options` 遇到空值且没有内置默认值时会删掉这个选项，而 `fn get_relay_server` 每次连接都现读选项【读码：机制成立；端到端没实测】。中继由被控端决定，所以只有被控端需要满足这一条。服务端只在设备首次接入或策略变更时下发这个清空，不是每次心跳都推，否则谁也没法再在本地固定中继。
   - **前提二**：hbbs 看到的必须是真实的公网源 IP，不能跑在 Docker 桥接网络的 NAT 后面，否则所有按 IP 的选择都会失效【推测】。这是部署时的检查项。
-- **第二级**（需要 Porta 客户端）：
+- **第二级**（需要 Leapgate 客户端）：
   - 服务端把候选中继列表下发给客户端；每台设备定期（例如每 5 分钟）测自己到各中继的 TCP 建连耗时，随心跳上报。
-  - 连接时，两端的测量都用各自最近一次随心跳上报的值：打洞请求带上发起方自己的设备 ID（新 proto 字段 `PunchHoleRequest.porta_from_id`），服务端拿它去查发起方上报过的测量。原因是现在的 `PunchHoleRequest` 里只有目标设备的 `id`【读码：`rendezvous.proto`】；第三期实施时（契约 02）没有照最初的写法把测量值本身放进打洞请求，因为发起连接的是界面进程，测量结果在服务进程里。
-  - 客户端改动：被控端的 `fn get_relay_server` 改成服务端下发值优先（4 行挂钩）：被控端连 porta-server 时本地 `relay-server` 设置不再生效，要固定某台中继用服务端的 `device pin-relay`。测速逻辑放在 `libs/porta`。
+  - 连接时，两端的测量都用各自最近一次随心跳上报的值：打洞请求带上发起方自己的设备 ID（新 proto 字段 `PunchHoleRequest.leapgate_from_id`），服务端拿它去查发起方上报过的测量。原因是现在的 `PunchHoleRequest` 里只有目标设备的 `id`【读码：`rendezvous.proto`】；第三期实施时（契约 02）没有照最初的写法把测量值本身放进打洞请求，因为发起连接的是界面进程，测量结果在服务进程里。
+  - 客户端改动：被控端的 `fn get_relay_server` 改成服务端下发值优先（4 行挂钩）：被控端连 leapgate-server 时本地 `relay-server` 设置不再生效，要固定某台中继用服务端的 `device pin-relay`。测速逻辑放在 `libs/leapgate`。
   - 原版客户端退回第一级的行为。
 - **可选，在第二级之后做**：服务端记住哪些设备之间一直打洞失败（比如两边都是对称 NAT），下次直接让它们走中继，省掉 1~3 秒的打洞等待。上游客户端已经会对失败过的对端缩短等待【读码】；服务端能不能让被控端直接跳过打洞，还没有确认【推测】。
 - **不做**：已建立的连接中途换中继，以及同时走多个中继择优。上游一个连接只走一个 hbbr，中途不能换【读码】，要改就得动会话层，代价太大。
@@ -287,7 +288,7 @@ flowchart TB
 
 ### 3.8 直连能力
 
-- **决定**（维护者 2026-10-22 确认，开工后读码更正了 IPv6 打洞的打开方式）：第一期打开 IPv6 打洞、不开 UDP 打洞，服务端记录中继回落率（连接最后回落到中继的比例）；UDP 打洞修不修，到第三期看数据再定。WebRTC 不开，不在前几期的范围内。IPv6 打洞由 `porta-server` 补上 IPv6 地址的转发，原版客户端在控制端手动勾选开关，Porta 客户端第二期默认打开；原方案"经心跳策略打开"做不到，见下文"IPv6 打洞怎么打开"。
+- **决定**（维护者 2026-10-22 确认，开工后读码更正了 IPv6 打洞的打开方式）：第一期打开 IPv6 打洞、不开 UDP 打洞，服务端记录中继回落率（连接最后回落到中继的比例）；UDP 打洞修不修，到第三期看数据再定。WebRTC 不开，不在前几期的范围内。IPv6 打洞由 `leapgate-server` 补上 IPv6 地址的转发，原版客户端在控制端手动勾选开关，Leapgate 客户端第二期默认打开；原方案"经心跳策略打开"做不到，见下文"IPv6 打洞怎么打开"。
 - **现状**【读码】：
   - 自建服务器下，UDP 打洞、IPv6 打洞、WebRTC 默认都是关的。`rustdesk@bd92623:src/common.rs` `fn get_local_option` 规定，`enable-udp-punch`、`enable-ipv6-punch`、`enable-webrtc` 没有设置、且服务器不是官方服务器时返回 `"N"`，这时只有 TCP 打洞兜底。
   - hbbs 从 `rustdesk-server@109d9a2`（2026-07-23，提交说明 "fix more UDP reflection/amplification"）起丢弃从 UDP 上来的 `PunchHoleSent`，而被控端的 UDP 打洞正是用 UDP 发送它。所以开源版的 UDP 打洞实际上是坏的（服务端行为读码确认，对客户端的影响是推测）。上游这么改是为了防 UDP 反射放大攻击。
@@ -302,13 +303,13 @@ flowchart TB
 - **IPv6 打洞先开**：很多家庭宽带在运营商级 NAT（CGNAT）后面，没有公网 IPv4，但有原生 IPv6，维护者家里就是这样，回家直连最受益。服务端补上转发、控制端勾选一个开关就能用，原版客户端也能用，所以放进第一期。控制端所在的网络没有 IPv6 时，照样退回 TCP 打洞或中继。
 - **IPv6 打洞怎么打开**（2026-10-22 开工后读码更正）：
   - 心跳策略打不开它：`enable-ipv6-punch` 是 LocalConfig 选项，只有控制端（发起方）在自己的用户进程里读；心跳策略写的是被控服务进程的 Config，改不到它【读码】（`docs/research/第一期服务端/01` §4）。
-  - 服务端：第一期由 `porta-server` 补上 `PunchHole`、`FetchLocalAddr`、`PunchHoleResponse` 里 IPv6 地址的转发。hbbs 强制中继时要清掉转发的 IPv6 地址，否则被控端会一边走中继一边做 IPv6 打洞，能绕过强制中继（`docs/research/第一期服务端/02` §6.4）。第一期不转发 `udp_port`：转发了，开了 UDP 打洞的控制端会让被控端改用 UDP 发 `PunchHoleSent`，IPv6 地址随这个 UDP 包一起被丢掉。
+  - 服务端：第一期由 `leapgate-server` 补上 `PunchHole`、`FetchLocalAddr`、`PunchHoleResponse` 里 IPv6 地址的转发。hbbs 强制中继时要清掉转发的 IPv6 地址，否则被控端会一边走中继一边做 IPv6 打洞，能绕过强制中继（`docs/research/第一期服务端/02` §6.4）。第一期不转发 `udp_port`：转发了，开了 UDP 打洞的控制端会让被控端改用 UDP 发 `PunchHoleSent`，IPv6 地址随这个 UDP 包一起被丢掉。
   - 原版客户端：在控制端的设置里手动勾选"Enable IPv6 P2P connection"；被控端什么都不用做。
-  - Porta 客户端：第二期把这个开关默认打开，或者让它认服务端下发的值。
+  - Leapgate 客户端：第二期把这个开关默认打开，或者让它认服务端下发的值。
 - **UDP 打洞的修法**：
   - `109d9a2` 只改了两行，让 hbbs 不再处理从 UDP 发来的 `PunchHoleSent` 和 `LocalAddr`【读码】。伪造来源地址的 UDP 包能让 hbbs 往受害者地址发包（反射），回包还比请求大（放大）。
   - 而 UDP 打洞恰恰要靠 hbbs 观察被控端这个 UDP 包的来源地址，才能知道它在 NAT 上映射出来的端口（`fn handle_punch_hole` 旁的代码注释也这么写），所以"客户端改用 TCP 发"行不通。
-  - 可行的修法是加一个防伪造的一次性随机数：hbbs 在 `PunchHole` 里把它发给被控端，被控端用 UDP 回 `PunchHoleSent` 时带上，hbbs 核对通过才处理。伪造来源地址的攻击者收不到这个随机数。这要加 proto 字段、改 Porta 客户端，放在第三期【推测：方案本身还没细化】。
+  - 可行的修法是加一个防伪造的一次性随机数：hbbs 在 `PunchHole` 里把它发给被控端，被控端用 UDP 回 `PunchHoleSent` 时带上，hbbs 核对通过才处理。伪造来源地址的攻击者收不到这个随机数。这要加 proto 字段、改 Leapgate 客户端，放在第三期【推测：方案本身还没细化】。
   - 只靠"来源地址和注册地址一致"来判断不够，因为注册本身也走 UDP，同样能伪造【推测】。
 - **UDP 打洞修不修看数据**：服务端从第一期起记录每次连接最后是直连还是回落到中继（中继请求要经过 hbbs，回落次数能统计出来【推测：具体怎么记要看代码】）。UDP 打洞主要帮助只有 IPv4 的网络；第三期开工时回落率还高就修，IPv6 已经覆盖大部分场景就不修。
 - **局域网直连不受 `109d9a2` 影响**：被控端回 `LocalAddr` 走的是临时 TCP 连接（`rustdesk@bd92623:src/rendezvous_mediator.rs` `fn handle_intranet_`）【读码】。
@@ -324,10 +325,10 @@ flowchart TB
   - 域名交给被控端解析，DNS 天然不会泄漏。只支持 TCP：浏览器访问 HTTP/3 网站时会退回 TCP，游戏、语音这类纯 UDP 的程序走不了【推测】。SOCKS5 的 UDP 支持以后再说。
   - 可以做一个"设为系统代理"的开关，默认关闭；打开时把 Windows 系统代理指向这个端口，浏览器就不用单独设置。
   - 访问控制：默认禁止访问被控端所在的局域网和被控端本机的端口，可以按网段放行。
-  - 改动点：`rustdesk@bd92623:src/server/port_forward_mux.rs` `fn on_open` 里"目标必须等于登录目标"的那一处判断，改成调用 `libs/porta` 的出口策略；被控端的审批弹窗显示"作为出口"，而不是某个固定目标。协议不用改【读码】，最多加一个标记字段。
+  - 改动点：`rustdesk@bd92623:src/server/port_forward_mux.rs` `fn on_open` 里"目标必须等于登录目标"的那一处判断，改成调用 `libs/leapgate` 的出口策略；被控端的审批弹窗显示"作为出口"，而不是某个固定目标。协议不用改【读码】，最多加一个标记字段。
   - 两端都不需要管理员权限；只有配置了代理的程序才走出口。
-- **全局出口不排期**：方向是编排 Tailscale/Headscale 的 exit node，由被控端广播出口、Headscale 批准、控制端选用，Porta 只做一键开关和状态显示。Headscale 官方文档确认支持出口节点（链接见 `docs/research/04`）。前提是两端都装了 Tailscale，并加入同一个 Headscale。
-- **只走多路复用隧道，拒绝旧的裸管道**：裸管道在登录后是明文【读码】。Porta 客户端只发起多路复用模式，Porta 被控端拒绝裸管道请求。代价是和老版本 RustDesk 之间不能互相做端口转发；上游新版本默认已经是多路复用。
+- **全局出口不排期**：方向是编排 Tailscale/Headscale 的 exit node，由被控端广播出口、Headscale 批准、控制端选用，Leapgate 只做一键开关和状态显示。Headscale 官方文档确认支持出口节点（链接见 `docs/research/04`）。前提是两端都装了 Tailscale，并加入同一个 Headscale。
+- **只走多路复用隧道，拒绝旧的裸管道**：裸管道在登录后是明文【读码】。Leapgate 客户端只发起多路复用模式，Leapgate 被控端拒绝裸管道请求。代价是和老版本 RustDesk 之间不能互相做端口转发；上游新版本默认已经是多路复用。
 - **吞吐上限**：
   - 单个通道受流控窗口限制，上限约为 256 KiB ÷ RTT：RTT 30 ms 时约 70 Mbit/s，100 ms 时约 21 Mbit/s【推测】；多条流并行时可以叠加。窗口大小是 `src/port_forward_mux.rs` 顶部的常量 `CHANNEL_WINDOW`，调大能提高吞吐，但会在上游文件里多一处改动，先实测再定。
   - 走中继时还受 hbbr 限速：单条连接 128 Mb/s；连续跑满 30 分钟、平均超过约 84 Mb/s 后降到 32 Mb/s；空闲 30 秒断开【读码，参数都能调】。中继走 TCP，代理的流量也是 TCP，丢包多时会有"TCP 套 TCP"的性能问题【推测】。
@@ -339,10 +340,10 @@ flowchart TB
 
 ### 3.10 品牌
 
-- 运行时变量 `APP_NAME` 和 `ORG`（`rustdesk@bd92623:libs/hbb_common/src/config.rs`）决定 Windows 服务名、注册表项、安装路径、配置目录和 URL scheme（`porta://`）【读码】。这些改掉以后，Porta 和原版 RustDesk 可以装在同一台机器上共存，过渡期很方便。
+- 运行时变量 `APP_NAME` 和 `ORG`（`rustdesk@bd92623:libs/hbb_common/src/config.rs`）决定 Windows 服务名、注册表项、安装路径、配置目录和 URL scheme（`leapgate://`）【读码】。这些改掉以后，Leapgate 和原版 RustDesk 可以装在同一台机器上共存，过渡期很方便。
 - 翻译不用逐条改：`src/lang.rs` 的 `fn translate_locale` 在运行时会把译文里的 "RustDesk" 换成当前的应用名【读码】。
 - 要手工改的写死位置：exe 和 dll 的文件名、各平台的包 ID（`com.carriez.flutter_hbb`）、MSI 打包参数、`res/` 下的打包脚本和图标。默认服务器和公钥的修改见 §3.2 的 hbb_common fork。
-- 只改默认服务器还不够：`api-server` 和自定义 ID 服务器都没配时，上游的 API 地址兜底到写死的 `https://admin.rustdesk.com`（`rustdesk@bd92623:src/common.rs` `fn get_api_server_`），不随 `RENDEZVOUS_SERVERS` 变，登录、地址簿的请求会发到 RustDesk 官方；`fn using_public_server` 也只看自定义服务器，主页会显示指向官方定价页的提示【读码】。Porta 已用挂钩处理：兜底地址改由 `libs/porta` 的 `porta::brand::default_api_server()` 给出，优先用构建时注入的 `PORTA_API_SERVER`，没设时按同样的规则从内置会合服务器推导，两者都没有就返回空串；`using_public_server` 在 Porta 里恒为假【读码】。
+- 只改默认服务器还不够：`api-server` 和自定义 ID 服务器都没配时，上游的 API 地址兜底到写死的 `https://admin.rustdesk.com`（`rustdesk@bd92623:src/common.rs` `fn get_api_server_`），不随 `RENDEZVOUS_SERVERS` 变，登录、地址簿的请求会发到 RustDesk 官方；`fn using_public_server` 也只看自定义服务器，主页会显示指向官方定价页的提示【读码】。Leapgate 已用挂钩处理：兜底地址改由 `libs/leapgate` 的 `leapgate::brand::default_api_server()` 给出，优先用构建时注入的 `LEAPGATE_API_SERVER`，没设时按同样的规则从内置会合服务器推导，两者都没有就返回空串；`using_public_server` 在 Leapgate 里恒为假【读码】。
 - **副作用要逐条审查**：改名后 `is_custom_client()` 自动为真，会改变一批 Rust 和 Dart 代码的默认行为和更新路径：Rust 侧 15 个调用点（其中 12 个真正改变行为，10 个在 Windows 上生效），Dart 侧 10 处直接调用，另有 27 处通过 7 个 `defaultOption*` 默认值间接受影响【读码：数量见 `docs/research/第二期客户端/01` §2】。初稿写的"22 处 Dart、19 处 Rust"大概是按字面含有这个函数名的行数的，没有算间接影响【推测】。这是第二期的一项正式任务。
 - 不改驱动名，改了要重新给驱动签名【推测】。上游 Windows 默认的虚拟显示驱动是第三方 Amyuni 的 `usbmmidd`（`rustdesk@bd92623:src/virtual_display_manager.rs` 的 `IDD_IMPL`），RustDeskIddDriver 只留着代码路径，上游构建不打包它；打印机驱动是 `RustDesk v4 Printer Driver`【读码】。
 - 不用上游的 `custom.txt` 改名机制：它需要 RustDesk 官方私钥签名，开源版用不了【读码】。
@@ -357,7 +358,7 @@ flowchart TB
   - 影响：从网上下载的 exe 会被 SmartScreen 拦一下；本机编译出来的文件不带"来自网络"标记，一般不会被拦【推测】；UAC 显示"未知发布者"；个别杀毒软件可能误报。
   - 驱动名不改，原样分发上游已签名的虚拟显示驱动和打印机驱动，签名应该仍然有效【推测】，第二期验证。
   - 分发给朋友之前再定签名方案，候选是商业代码签名证书、微软的托管签名服务，或者只在自己的设备上信任自签根证书。价格和个人申请资格到时再查一手来源。
-  - 上游的"启动时检查更新"在 `is_custom_client()` 为真时直接跳过（`rustdesk@bd92623:src/common.rs` `fn check_software_update`），但 Windows 的后台自动更新不看它：安装版的服务进程由 `src/rendezvous_mediator.rs` `fn start_all` 启动自动更新，`src/updater.rs` `fn check_update` 只看 `allow-auto-update`，打开后会把设备指纹发到 `api.rustdesk.com`，下载原版 RustDesk 安装包并以特权身份运行【读码】。这个选项默认关，但 Windows 安装版的设置页仍显示"Auto update"勾选框，服务端心跳策略也能把它打开。Porta 已在 `check_update` 开头加挂钩（`porta::update::official_update_disabled()`，恒为真），所以两条路径都不会去 RustDesk 官方拉取新版本【读码】。Porta 自己的自动更新以后再做。
+  - 上游的"启动时检查更新"在 `is_custom_client()` 为真时直接跳过（`rustdesk@bd92623:src/common.rs` `fn check_software_update`），但 Windows 的后台自动更新不看它：安装版的服务进程由 `src/rendezvous_mediator.rs` `fn start_all` 启动自动更新，`src/updater.rs` `fn check_update` 只看 `allow-auto-update`，打开后会把设备指纹发到 `api.rustdesk.com`，下载原版 RustDesk 安装包并以特权身份运行【读码】。这个选项默认关，但 Windows 安装版的设置页仍显示"Auto update"勾选框，服务端心跳策略也能把它打开。Leapgate 已在 `check_update` 开头加挂钩（`leapgate::update::official_update_disabled()`，恒为真），所以两条路径都不会去 RustDesk 官方拉取新版本【读码】。Leapgate 自己的自动更新以后再做。
 - **构建**：
   - 服务端在 Linux 测试机上构建和测试，用普通的 `cargo build`，可以交叉编译成 musl 静态二进制。第一期只需要这一步。
   - 客户端（第二期）先在本机 Windows 上手工搭一次，边搭边固化成 PowerShell 脚本。Rust 用当前的稳定版；vcpkg 依赖按上游清单安装，配本地二进制缓存。稳定后再挂到 Forgejo Actions，用自己的 Windows 机器当 runner。
@@ -389,53 +390,53 @@ flowchart TB
 第一期和第二期互不依赖，可以同时做。
 
 - **第一期：服务端**（用原版客户端就能验证，不需要 Windows 构建链）
-  - 建 `porta-server` 和 `porta-cardo` 两个 fork。`porta-server` 挂进总仓库的 `server/`，它的 hbb_common 子模块指向 `porta-cardo`，并升到和客户端相同的版本。
-  - 搭 `porta-server` 骨架：hbbs 硬分叉，加上 API 模块（§3.6 的最小集合）、路由策略第一级和心跳策略下发。
+  - 建 `leapgate-server` 和 `leapgate-cardo` 两个 fork。`leapgate-server` 挂进总仓库的 `server/`，它的 hbb_common 子模块指向 `leapgate-cardo`，并升到和客户端相同的版本。
+  - 搭 `leapgate-server` 骨架：hbbs 硬分叉，加上 API 模块（§3.6 的最小集合）、路由策略第一级和心跳策略下发。
   - 在会合端口的 TCP 连接上实现密钥交换（KeyExchange，§3.5），否则登录过 API 的原版客户端连不上任何设备。
   - 补上打洞信令里 IPv6 地址的转发，强制中继时清掉它，不转发 `udp_port`（§3.8）；记录每次连接是直连还是回落到中继。
   - 记录每台设备的客户端类型和版本，为退出兼容做准备（§3.1）。
   - 从 rustdesk-api 迁移用户、用户组和地址簿。
-  - 验收：原版 RustDesk 客户端改为指向 porta-server 后，登录、地址簿、设备列表、审计都正常；登录过 API、配了服务器公钥的控制端能正常发起连接（验证 KeyExchange）；被控端本地写死的中继能被远程清掉；中继按双方位置选择；控制端已勾选 IPv6 打洞、两端都有 IPv6 时能直连。
+  - 验收：原版 RustDesk 客户端改为指向 leapgate-server 后，登录、地址簿、设备列表、审计都正常；登录过 API、配了服务器公钥的控制端能正常发起连接（验证 KeyExchange）；被控端本地写死的中继能被远程清掉；中继按双方位置选择；控制端已勾选 IPv6 打洞、两端都有 IPv6 时能直连。
 - **第二期：客户端骨架**
-  - 建 `porta-client` fork（`porta-cardo` 在第一期已经建好），挂进总仓库的 `client/`。
+  - 建 `leapgate-client` fork（`leapgate-cardo` 在第一期已经建好），挂进总仓库的 `client/`。
   - 改名、换图标。
   - 跑通 Windows 构建（不签名）。
   - 审查 `is_custom_client()` 的影响（Rust 15 处，Dart 直接 10 处、间接 27 处，见 §3.10）。
-  - 搭好 `libs/porta` 和 `porta_ffi.rs` 的空骨架。
+  - 搭好 `libs/leapgate` 和 `leapgate_ffi.rs` 的空骨架。
   - 写冒烟清单。
-  - 验收：Porta 客户端和原版 RustDesk 能装在同一台机器上共存，并且能互相连接。
+  - 验收：Leapgate 客户端和原版 RustDesk 能装在同一台机器上共存，并且能互相连接。
 - **第三期：路由和直连增强**
   - 路由第二级（客户端测速上报）和设备签名。
   - UDP 打洞（加防伪造随机数，§3.8）做不做，看第一期以来的中继回落率再定。
-  - 心跳、sysinfo、审计改走 `libs/porta` 的新 API 客户端（在 `sync.rs` 里加挂钩，上游调用关掉、不删）。
+  - 心跳、sysinfo、审计改走 `libs/leapgate` 的新 API 客户端（在 `sync.rs` 里加挂钩，上游调用关掉、不删）。
 - **第四期：应用出口**
   - 先实测多路复用隧道的吞吐，再做出口权限、出口目录、本地 SOCKS5 和访问控制。
 - **并行轨道：新界面**（第二期完成后开始）
   - 先出视觉设计方案并单独确认，再做 models 去界面化，然后按块重写。界面只依赖接口层，不和第三、四期抢同一批文件。
-  - 重写时把登录、地址簿、设备组的 HTTP 调用从 Dart 下沉到 `libs/porta`。
-- **退出兼容**（第三期和新界面轨道都完成后）：服务端打开"只接受 Porta 客户端"开关，稳定一个版本后删掉兼容代码和这个开关（§3.1）。
+  - 重写时把登录、地址簿、设备组的 HTTP 调用从 Dart 下沉到 `libs/leapgate`。
+- **退出兼容**（第三期和新界面轨道都完成后）：服务端打开"只接受 Leapgate 客户端"开关，稳定一个版本后删掉兼容代码和这个开关（§3.1）。
 - **以后再做**：全局出口（编排 Tailscale）、Android 控制端、UDP 出口、代码签名。
 
 ## 6. 风险和前提
 
 - hbbs 要能看到真实的公网源 IP（§3.7 前提二），否则按 IP 选中继无效。
-- 上游的热点文件正好是 Porta 要加挂钩的文件，合并冲突免不了，只能靠"只加挂钩"把冲突压小。
+- 上游的热点文件正好是 Leapgate 要加挂钩的文件，合并冲突免不了，只能靠"只加挂钩"把冲突压小。
 - `is_custom_client()` 的行为变化（§3.10）审查完之前，改名后的行为不可预期。
 - 多路复用隧道的吞吐、hbbr 限速对出口体验的影响，都还没有实测。
 - UDP 打洞的防伪造随机数方案还没细化，要先确认 `PunchHole` 链路上能不能可靠地把随机数带给被控端。
 - 第一级所用 IP 库在各地的精度没有验证过。
-- AGPL：别人通过网络使用 Porta 服务端时，要向他们提供源码。所有仓库都公开，这一条就满足了。
+- AGPL：别人通过网络使用 Leapgate 服务端时，要向他们提供源码。所有仓库都公开，这一条就满足了。
 
 ## 7. 决策记录
 
 下面 9 条都在 2026-10-22 和维护者逐条确认，详细内容见各节。第 4、7 条含同日第一期开工后的补定和读码更正，已在条目里注明。
 
 1. 兼容原版客户端（§3.1）：服务端和原版 RustDesk 客户端保持协议兼容，新能力只做加法；兼容只在最初几个版本提供，兼容债务在几个迭代内清掉，退出机制见 §3.1。
-2. 分叉方式和仓库布局（§3.2）：客户端跟随上游正式版本合并，服务端硬分叉；`Porta` 作总仓库，用子模块挂 `porta-client` 和 `porta-server`；hbb_common 的 fork 叫 `porta-cardo`；全部公开，公开前先脱敏。
-3. 服务端形态（§3.5）：服务端做成单进程 `porta-server`（hbbs 分叉，内置 API 和路由策略），hbbr 用原版，第一期只用命令行管理。
+2. 分叉方式和仓库布局（§3.2）：客户端跟随上游正式版本合并，服务端硬分叉；`Leapgate` 作总仓库，用子模块挂 `leapgate-client` 和 `leapgate-server`；hbb_common 的 fork 叫 `leapgate-cardo`；全部公开，公开前先脱敏。
+3. 服务端形态（§3.5）：服务端做成单进程 `leapgate-server`（hbbs 分叉，内置 API 和路由策略），hbbr 用原版，第一期只用命令行管理。
 4. 地址簿（§3.6）：只做新版地址簿（含共享簿），共享簿密码加密落盘，共享簿用命令行管理。开工后补定：个人簿的密码哈希也加密落盘；"读写"可以删簿内的设备和标签，"完全控制"在客户端接口里和读写相同；做用户组，共享簿可以授权给组，组用命令行管理，从 rustdesk-api 导入时组和组规则一起导入。
 5. 智能路由（§3.7）：分两级，共用一个代价模型；第一级用 GeoIP/ASN 库估算（推荐 DB-IP Lite），不手写区域表；第二级由客户端测速、随心跳上报，打洞请求带发起方 ID，服务端查两端上报的测量（第三期实施时由"测量随打洞请求带上"改成这样）；固定中继在服务端配置；权重先用静态值。
 6. 界面技术栈（§3.4）：界面默认留 Flutter，新界面开工前做 3~5 天的 Slint 原型再定换不换；不支持 Windows 7；留 Flutter 时的多窗口做法等原型结果再定。
-7. 直连能力（§3.8）：第一期打开 IPv6 打洞、不开 UDP 打洞，服务端记录中继回落率；UDP 打洞修不修，到第三期看数据再定。开工后读码更正：IPv6 打洞没法经心跳策略打开，改为 `porta-server` 补上 IPv6 地址的转发，原版客户端在控制端手动勾选开关，Porta 客户端第二期默认打开。
+7. 直连能力（§3.8）：第一期打开 IPv6 打洞、不开 UDP 打洞，服务端记录中继回落率；UDP 打洞修不修，到第三期看数据再定。开工后读码更正：IPv6 打洞没法经心跳策略打开，改为 `leapgate-server` 补上 IPv6 地址的转发，原版客户端在控制端手动勾选开关，Leapgate 客户端第二期默认打开。
 8. Exit Node（§3.9）：出口是设备能力，服务端登记出口目录；第四期做 SOCKS5/HTTP CONNECT 应用出口，只支持 TCP；默认禁止访问被控端局域网；允许走中继；拒绝裸管道；全局出口不排期。
 9. 平台、签名和构建（§3.11）：先只做 Windows（控制端和被控端），前两期不签名；服务端在 Linux 测试机上构建；客户端先在本机手工搭、用脚本固化，稳定后再挂到 Forgejo Actions。

@@ -1,11 +1,11 @@
 #Requires -Version 7.0
-# Porta Windows 客户端构建链的公共部分：钉住的版本、目录布局、进程内环境。
+# Leapgate Windows 客户端构建链的公共部分：钉住的版本、目录布局、进程内环境。
 # 由 setup-toolchain.ps1 和 build-client.ps1 点源（. "$PSScriptRoot\env.ps1"），不单独运行。
 # 依据：docs/research/第二期客户端/03-Windows构建链方案.md（方案 B：官方 Flutter 3.44.9 + 上游源码补丁脚本）。
 
 $ErrorActionPreference = 'Stop'
 
-$PortaPins = @{
+$LeapgatePins = @{
     # 不用浮动的 stable；合并上游后再评估要不要升
     Rust          = '1.99.1'
     Flutter       = '3.44.9'
@@ -22,16 +22,16 @@ $PortaPins = @{
     CargoExpand   = '1.0.95'
 }
 
-function Get-PortaLayout {
+function Get-LeapgateLayout {
     param([string]$BuildRoot)
-    if (-not $BuildRoot) { $BuildRoot = $env:PORTA_BUILD_ROOT }
-    if (-not $BuildRoot) { $BuildRoot = 'C:\porta-build' }
+    if (-not $BuildRoot) { $BuildRoot = $env:LEAPGATE_BUILD_ROOT }
+    if (-not $BuildRoot) { $BuildRoot = 'C:\leapgate-build' }
     @{
         Root        = $BuildRoot
         Downloads   = Join-Path $BuildRoot 'downloads'
         Logs        = Join-Path $BuildRoot 'logs'
-        Flutter     = Join-Path $BuildRoot "flutter-$($PortaPins.Flutter)"
-        Llvm        = Join-Path $BuildRoot "llvm-$($PortaPins.Llvm)"
+        Flutter     = Join-Path $BuildRoot "flutter-$($LeapgatePins.Flutter)"
+        Llvm        = Join-Path $BuildRoot "llvm-$($LeapgatePins.Llvm)"
         Vcpkg       = Join-Path $BuildRoot 'vcpkg'
         VcpkgCache  = Join-Path $BuildRoot 'vcpkg-cache'
         CargoTools  = Join-Path $BuildRoot 'cargo-tools'
@@ -48,7 +48,7 @@ function Get-GitRoot {
 # 进程内环境，不写系统或用户环境变量。
 # PATH 用白名单重建：机器上常有 MinGW 的 cmake/ninja/gcc、Git 的 usr\bin（自带一个 link.exe）、
 # 其他版本的 ffmpeg 等，会被 vcpkg 的端口脚本或 cargo 误用。VS 由各工具自己用 vswhere 找，不需要开发者环境。
-function Set-PortaBuildEnv {
+function Set-LeapgateBuildEnv {
     param([hashtable]$Layout)
 
     $python = Get-Command python.exe -CommandType Application -ErrorAction SilentlyContinue |
@@ -74,7 +74,7 @@ function Set-PortaBuildEnv {
         "$sys\System32\OpenSSH"
     ) -join ';'
 
-    $env:RUSTUP_TOOLCHAIN = $PortaPins.Rust
+    $env:RUSTUP_TOOLCHAIN = $LeapgatePins.Rust
     $env:LIBCLANG_PATH = Join-Path $Layout.Llvm 'bin'
     $env:PUB_CACHE = $Layout.PubCache
     $env:VCPKG_ROOT = $Layout.Vcpkg

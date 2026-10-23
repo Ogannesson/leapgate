@@ -1,5 +1,7 @@
 # 04 Slint 原型可行性预研
 
+> Porta 是当时的工作名，2026-10-24 改名为 Leapgate（跃门）。
+
 查证日期：2026-10-22（下文 URL 均为当天访问）。对应方案 `docs/architecture.md` §3.4"怎么定"的三条标准，重点是第 2 条（hwcodec 硬解纹理零拷贝进 Slint 的 wgpu）。
 
 标注口径：

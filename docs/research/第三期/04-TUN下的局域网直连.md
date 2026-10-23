@@ -1,5 +1,6 @@
 # 第三期调研 04：TUN 代理下的局域网直连
 
+> Porta 是当时的工作名，2026-10-24 改名为 Leapgate（跃门）。
 > 2026-10-23 写。基线：客户端 `rustdesk@bd92623`（`porta-client` main 在 `ea74616`，本文涉及的 `src/rendezvous_mediator.rs` 只多一行无关挂钩，`src/client.rs`、`src/server.rs` 和基线逐字相同），hbb_common 用客户端子模块里的版本；服务端 `porta-server@c79181b`（会合部分和 `7c85b95` 相同）。TUN 一侧读的是 mihomo 用的 `MetaCubeX/sing-tun@abfcfde`（meta 分支，2026-10-22）和 `clash-verge-rev` dev 分支。
 > 标记：【读码】读代码确认；【推测】推断，未编译、未实测；【实测】2026-10-23 第一期验收里实际看到的；【旁证】第三方 issue、文档。
 > 本文只谈"同一局域网、服务端已经判成同一内网"这一条路。跨网打洞、路由选中继分别见笔记 01 和第一期的 `server/PORTA.md`。

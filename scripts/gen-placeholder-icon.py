@@ -1,9 +1,9 @@
-"""Generate Porta's PLACEHOLDER icon (a doorway) into a porta-client checkout.
+"""Generate Leapgate's PLACEHOLDER icon (a doorway) into a leapgate-client checkout.
 
-Porta has no visual design yet. This draws a plain arched doorway on a rounded square
+Leapgate has no visual design yet. This draws a plain arched doorway on a rounded square
 and writes every icon file the Windows build uses. Replace it once a real design exists.
 
-Usage: python scripts/gen-placeholder-icon.py <porta-client dir>
+Usage: python scripts/gen-placeholder-icon.py <leapgate-client dir>
 Needs Pillow (pip install pillow).
 
 Writes, relative to the client dir:
@@ -29,7 +29,7 @@ ARCH_R = (DOOR_RIGHT - DOOR_LEFT) // 2
 KNOB_X, KNOB_Y, KNOB_R = 156, 166, 9
 
 SVG = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-<!-- Porta placeholder icon: replace once a real design exists. -->
+<!-- Leapgate placeholder icon: replace once a real design exists. -->
 <rect width="256" height="256" rx="{CORNER}" fill="{BG}"/>
 <path d="M{DOOR_LEFT} {DOOR_BOTTOM}V{ARCH_CENTER_Y}a{ARCH_R} {ARCH_R} 0 0 1 {2 * ARCH_R} 0V{DOOR_BOTTOM}z" fill="{FG}"/>
 <circle cx="{KNOB_X}" cy="{KNOB_Y}" r="{KNOB_R}" fill="{BG}"/>
@@ -72,7 +72,7 @@ def main():
         sys.exit(__doc__)
     client = Path(sys.argv[1])
     if not (client / "flutter" / "windows").is_dir():
-        sys.exit(f"{client} does not look like a porta-client checkout")
+        sys.exit(f"{client} does not look like a leapgate-client checkout")
     big = render(SUPERSAMPLE)
     (client / "flutter/assets/icon.svg").write_text(SVG, encoding="utf-8", newline="\n")
     for rel in ("flutter/windows/runner/resources/app_icon.ico", "res/icon.ico", "res/tray-icon.ico"):

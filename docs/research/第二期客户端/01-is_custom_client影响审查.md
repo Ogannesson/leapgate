@@ -1,5 +1,7 @@
 # 01 · 改名后 `is_custom_client()` 变真的影响审查
 
+> Porta 是当时的工作名，2026-10-24 改名为 Leapgate（跃门）。
+
 - 查证日期：2026-10-22
 - 代码基线：`porta-client@8f35d1f95`，和 `rustdesk@bd92623` 只差 `.gitmodules` 一行，下文统一写 `rustdesk@bd92623:路径`；`libs/hbb_common` 在 `5d52530`。
 - 标注：【读码】附文件和函数；【一手来源】附 URL；【推测】是没跑过、只按代码推的结论。

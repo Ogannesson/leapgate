@@ -1,5 +1,7 @@
 # 02 原版 hbbs 内部结构与 Porta 挂钩点
 
+> Porta 是当时的工作名，2026-10-24 改名为 Leapgate（跃门）。
+
 调研日期 2026-10-22。只读代码，没有运行。
 
 - 服务端 `rustdesk-server@873230e`，下文写 `srv:`，路径相对 `upstream/rustdesk-server/`。

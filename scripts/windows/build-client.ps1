@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-  编译 Porta Windows 客户端（Flutter 版，x64），产物（porta.exe、libporta.dll 等）留在源码目录的
+  编译 Leapgate Windows 客户端（Flutter 版，x64），产物（leapgate.exe、libleapgate.dll 等）留在源码目录的
   flutter\build\windows\x64\runner\Release\。
 
 .DESCRIPTION
@@ -14,7 +14,7 @@
   所以 -Source 应该是专门用来构建的 worktree，改动不要提交。
 
 .EXAMPLE
-  pwsh -File scripts\windows\build-client.ps1 -Source D:\src\porta-client
+  pwsh -File scripts\windows\build-client.ps1 -Source D:\src\leapgate-client
 #>
 param(
     [Parameter(Mandatory)][string]$Source,
@@ -26,11 +26,11 @@ param(
 )
 
 . "$PSScriptRoot\env.ps1"
-$L = Get-PortaLayout $BuildRoot
+$L = Get-LeapgateLayout $BuildRoot
 $Source = (Resolve-Path $Source).Path
 New-Item -ItemType Directory -Force $L.Logs | Out-Null
 $stamp = Get-Date -Format yyyyMMdd-HHmmss
-$tools = Set-PortaBuildEnv $L
+$tools = Set-LeapgateBuildEnv $L
 Push-Location $Source
 try {
     # ---- vcpkg ----
@@ -47,7 +47,7 @@ try {
     }
 
     # ---- patch ----
-    $pinnedLock = Join-Path $PSScriptRoot "pubspec.lock.flutter-$($PortaPins.Flutter)"
+    $pinnedLock = Join-Path $PSScriptRoot "pubspec.lock.flutter-$($LeapgatePins.Flutter)"
     if ('patch' -in $Steps) {
         $log = Join-Path $L.Logs "$stamp-patch.log"
         Invoke-Logged $log $tools.GitBash @('.github/patches/apply_flutter_3.44_source_patches.sh')
@@ -98,8 +98,8 @@ try {
         $env:CXXFLAGS_x86_64_pc_windows_msvc = $trim
         Invoke-Logged $log python.exe $buildArgs
         $out = Join-Path $Source 'flutter\build\windows\x64\runner\Release'
-        # crate 仍叫 librustdesk，Flutter 的 CMake 拷贝时改名为 libporta.dll
-        foreach ($f in 'porta.exe', 'libporta.dll', 'flutter_windows.dll', 'data\app.so') {
+        # crate 仍叫 librustdesk，Flutter 的 CMake 拷贝时改名为 libleapgate.dll
+        foreach ($f in 'leapgate.exe', 'libleapgate.dll', 'flutter_windows.dll', 'data\app.so') {
             if (-not (Test-Path (Join-Path $out $f))) { throw "产物缺少 $f：$out" }
         }
         # pubspec.yaml 随上游合并会变；pub get 改写了锁文件就说明钉住的那份要更新

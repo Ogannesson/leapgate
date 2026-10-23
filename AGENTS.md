@@ -1,6 +1,6 @@
-# Porta
+# Leapgate（跃门）
 
-基于 RustDesk 深度改进的远程桌面（2026-10-22 立项，名字取拉丁/意大利语"门"：既是进入远程桌面的入口，也是 Exit Node 的出口）。
+基于 RustDesk 深度改进的远程桌面（2026-10-22 立项）。名字 Leapgate = leap（一跃）+ gate（门）：一步跨过去的门，对应打洞直连，也是 Exit Node 的出口；中文名跃门。原工作名 Porta（拉丁语"门"），2026-10-24 因域名被占改名，带日期的调研笔记里仍是旧名。
 
 **维护者本地有 `internal/` 时先读 `internal/README.md`**：那是独立的私有仓库，放立项背景、现网部署、待办这些不公开的内部文档。公开仓库里没有它，也不依赖它。
 
@@ -14,15 +14,15 @@
 ## 状态
 - 2026-10-22：架构方案 `docs/architecture.md` 已和维护者逐条确认（第 7 节是决策记录），下一步按第 5 节分期开工，第一期是服务端。调研依据在 `docs/research/`（7 份笔记，基于上游 `rustdesk@bd92623`、`rustdesk-server@873230e`）。
 - 方案只谈抽象分层，部署选址不在方案里。
-- 2026-10-22：第一期（服务端）开工。三个代码仓库都已建好并挂成子模块：`server/` → `porta-server`（起点 `rustdesk-server@873230e`），`client/` → `porta-client`（起点 `rustdesk@bd92623`，和调研基线一致，第二期再合上游正式版本）；两者的 `libs/hbb_common` 都指向 `porta-cardo`（`5d52530`）。子模块地址都是相对路径，新检出用 `git clone --recurse-submodules`。
+- 2026-10-22：第一期（服务端）开工。三个代码仓库都已建好并挂成子模块：`server/` → `leapgate-server`（起点 `rustdesk-server@873230e`），`client/` → `leapgate-client`（起点 `rustdesk@bd92623`，和调研基线一致，第二期再合上游正式版本）；两者的 `libs/hbb_common` 都指向 `leapgate-cardo`（`5d52530`）。子模块地址都是相对路径，新检出用 `git clone --recurse-submodules`。
 
-- 2026-10-23：第一期服务端实现完成并合进 porta-server main（`7c85b95`，321 个测试）。实施契约是 `server/PORTA.md`，所有取值、取舍和实测依据都写在里面。经过八轮审查：前三轮查功能正确性；后五轮查资源上限，覆盖会合端口的帧长、并发和注册限流，21114 的连接保护和超时，地址簿、设备表、审计表的上限，WAL 上界和强制 checkpoint，以及会合主循环的独立连接池。最后一轮只剩说明性的小问题。还剩部署（选机器、迁移现网数据），由维护者安排。
-- 2026-10-23：第三期第一项"TUN 下的局域网直连（多候选地址）"合进 main：porta-client `6bb19b190`（契约 `client/PORTA.md` §3）、porta-server `d8403ad`（转发 `porta_local_addrs`）、proto 在 porta-cardo `1a46681`（服务端线）/`df76a0c`（客户端线）。经两轮审查和一轮复核，等维护者用两台开 TUN 的 Windows 端到端测。
-- 2026-10-23：第三期实施契约写好（`docs/第三期实施契约/`：README 总述 + 四块），吸收了笔记 05（含 UU 远程解密日志）的借鉴项，经四路起草、三路交叉核对、逐块复核和三路终审。待维护者定 README §1.1 的 P-1~P-4，确认前不派 coder、不改两份 PORTA.md。
+- 2026-10-23：第一期服务端实现完成并合进 leapgate-server main（`7c85b95`，321 个测试）。实施契约是 `server/LEAPGATE.md`，所有取值、取舍和实测依据都写在里面。经过八轮审查：前三轮查功能正确性；后五轮查资源上限，覆盖会合端口的帧长、并发和注册限流，21114 的连接保护和超时，地址簿、设备表、审计表的上限，WAL 上界和强制 checkpoint，以及会合主循环的独立连接池。最后一轮只剩说明性的小问题。还剩部署（选机器、迁移现网数据），由维护者安排。
+- 2026-10-23：第三期第一项"TUN 下的局域网直连（多候选地址）"合进 main：leapgate-client `6bb19b190`（契约 `client/LEAPGATE.md` §3）、leapgate-server `d8403ad`（转发 `leapgate_local_addrs`）、proto 在 leapgate-cardo `1a46681`（服务端线）/`df76a0c`（客户端线）。经两轮审查和一轮复核，等维护者用两台开 TUN 的 Windows 端到端测。
+- 2026-10-23：第三期实施契约写好（`docs/第三期实施契约/`：README 总述 + 四块），吸收了笔记 05（含 UU 远程解密日志）的借鉴项，经四路起草、三路交叉核对、逐块复核和三路终审。待维护者定 README §1.1 的 P-1~P-4，确认前不派 coder、不改两份 LEAPGATE.md。
 - 2026-10-23 · 第三期契约的决定：P-1 UDP 打洞进第三期（只修前置障碍、做普通 UDP 打洞，改架构 §3.8"看回落率再定"）；P-4 局域网候选带 IPv6，范围是 ULA + 和控制端物理网卡同一 /64 的全局地址，私网 IPv4 优先；P-3 维护者没有偏好，主会话选 A（开 TUN 时不看 TCP 测出的 NAT 类型，有随机数和 UDP 端口就直接试打洞）。P-2 维护者定了原则而不是选项：**兼容性要考虑全面，不能假定任何运行环境，规则必须对所有环境都适用**（要么不管开不开 TUN 都生效，要么能判别清楚有没有开 TUN），不接受"要用户配环境规则"或"按设备主人授权"的做法。这条原则适用于整份契约。
 - 2026-10-23 · 第三期顺序调整（维护者定）：先评估上游现成的 WebRTC/ICE 路径（UU 远程式的"候选全交换、客户端逐对实测"，上游 `hbb_common/src/webrtc.rs` 已有实现，开源服务端不转发它的信令），01 上报与认证、02 路由第二级照常推进；03 局域网判定与候选、04 UDP 打洞与 NAT 探测搁置，等评估结果再定（契约里按"UDP 出口证明"改写的 03/04 是评估不通过时的备选）。
-- 2026-10-24 · 第三期 01 上报与认证合进 main：porta-server `299e07e`、porta-client `a6cb842b9`（`libs/porta` 版本 0.3.0）。经审查、修复、两轮复核；契约 01 已按最终实现同步（控制台只有 `kl` 按库重载、改库只由命令行做；注册先扣查库预算再按库重载；2xx 的 time 偏差超 30 秒才采信；根证书信系统库加内置 webpki，因为 Windows 根证书按需下载、rustls 不会触发）。测试机还没部署（WebRTC 评估期间跑的是评估版服务端）。
-- 2026-10-24 · 第三期 02 路由第二级合进 main：porta-server `3c8b9a3`、porta-client `d6e194a15`；proto `PunchHoleRequest.porta_from_id = 1000` 在 porta-cardo 服务端线 `ea3a879`（分支 `porta/lan-candidates`）、客户端线 `aa9a582`（分支 `porta/client`），两条线内容逐字一致。经四视角审查（没有正确性问题），补了测试；契约 02 按审查同步（`198.18/15` 对端不看耗时整轮作废、冒用 `porta_from_id` 能侧面推断对方相对延迟的口径）。
+- 2026-10-24 · 第三期 01 上报与认证合进 main：leapgate-server `299e07e`、leapgate-client `a6cb842b9`（`libs/leapgate` 版本 0.3.0）。经审查、修复、两轮复核；契约 01 已按最终实现同步（控制台只有 `kl` 按库重载、改库只由命令行做；注册先扣查库预算再按库重载；2xx 的 time 偏差超 30 秒才采信；根证书信系统库加内置 webpki，因为 Windows 根证书按需下载、rustls 不会触发）。测试机还没部署（WebRTC 评估期间跑的是评估版服务端）。
+- 2026-10-24 · 第三期 02 路由第二级合进 main：leapgate-server `3c8b9a3`、leapgate-client `d6e194a15`；proto `PunchHoleRequest.leapgate_from_id = 1000` 在 leapgate-cardo 服务端线 `ea3a879`（分支 `leapgate/lan-candidates`）、客户端线 `aa9a582`（分支 `leapgate/client`），两条线内容逐字一致。经四视角审查（没有正确性问题），补了测试；契约 02 按审查同步（`198.18/15` 对端不看耗时整轮作废、冒用 `leapgate_from_id` 能侧面推断对方相对延迟的口径）。
 - 2026-10-24 · WebRTC 评估 S1 实测（笔记 06 §9.1）：两端开 mihomo TUN 时上游 WebRTC 路径必然失败，根因是 Windows 10054 让 webrtc-ice 的候选 socket 静默失效（对端报的 TUN 地址 198.18.0.1 在本机引来 ICMP，rustdesk-org/webrtc 的 `recv_loop` 吞掉错误退出）；Mac 关 TUN 后 ICE 选中 IPv6 host 对连通。维护者定只补测 S2/S3/S4（B 组）：S2 3/3、S3 4/4、S4 2/3 直连，失败同属上述机制。结论（§9.3）：ICE 思路在目标环境成立，上游实现不采用，按笔记 07 自研；自研必须关掉 socket 的 ICMP 报错（`SIO_UDP_CONNRESET`）、不收集 TUN/VPN 候选。
 - 2026-10-24 · 维护者决定改名（Porta 相关域名几乎都被注册，以后发布没有官网可用）：**整体改**，仓库、crate、接口路径、请求头、签名前缀等协议字符串一起改，不保留 porta 当内部代号；新名字不限词源、短而好拼，要配中文名，域名不必非 .com。同日定名 **Leapgate，中文名跃门**（leap 一跃 + gate 门：一步跨过去的门，对应打洞直连，延续"门"的原意；候选和核实记录在私有仓库 `internal/命名候选-2026-10.md`）。改名找没有分支在跑的时候一次做完（02 合入后、自研 ICE 开工前）。改名的决定：仓库改成 `Leapgate`、`leapgate-server`、`leapgate-client`、`leapgate-cardo`（保留"门枢"的搭配）、`Leapgate-internal`，由主会话推到新名字的 Forgejo 仓库（首推自动建私有库），旧仓库由维护者之后删除或归档；协议字符串用全称（`/api/leapgate/v1/`、`Leapgate-Device-Auth`、`Leapgate-Server-Sig`、`leapgate-device-v1`、`leapgate-server-v1`、`leapgate-api-caps`、保留前缀 `leapgate-`、客户端类型 `leapgate`、proto 字段 `leapgate_*`）；现行文档（AGENTS、架构、实施说明、契约、脚本）全改，带日期的调研笔记和决策原文保留 Porta，开头注明是当时的工作名。本地总目录 `WorkSpace\Porta` 暂不改名（worktree 和会话路径都依赖它）。
 - 2026-10-24 · 维护者表示"如果进度快，直接用 Porta 自己做的 ICE 也行"（不依赖上游 webrtc-rs）。主会话安排：上游 WebRTC 评估照常完成（临时分支已做好，结果用来回答自研设计的关键问题），同时出自研 ICE 的设计方案（`docs/research/第三期/07-Porta自研ICE设计.md`），给维护者确认后再定走哪条。
@@ -30,22 +30,22 @@
 ## 已定的架构决策（详细理由在 `docs/architecture.md`）
 - 2026-10-22 · 兼容原版 RustDesk 客户端只在最初几个版本提供；兼容带来的代价（上报接口不认证、靠 404 之类的约定判断能力、远程清中继的变通等）要在几个迭代内移除，不长期背着。退出机制见 §3.1。
 - 2026-10-22 · 界面默认留 Flutter；新界面轨道开工前先做 3~5 天的 Slint 原型（标准见 §3.4：真实解码输出 1080p60/4K60、hwcodec 的 BGRA D3D11 纹理零拷贝进 wgpu、多窗口/中文输入法/高 DPI），过了且桌面优先才换。
-- 2026-10-22 · 客户端跟随上游正式版本合并（merge 不 rebase），服务端硬分叉。仓库：`Porta` 是总仓库，用子模块挂 `client/`（`porta-client`，rustdesk fork）和 `server/`（`porta-server`，rustdesk-server fork）；hbb_common 的 fork 叫 `porta-cardo`（拉丁语"门枢"，2026-10-22 定名），挂在两者的 `libs/hbb_common` 位置，crate 名不改。全部公开、AGPL-3.0（§3.2）。
-- 2026-10-22 · 服务端是单进程 `porta-server`（hbbs 硬分叉，内置 API 和路由策略，SQLite，HTTP 用 axum），hbbr 用原版、统一配 `-k`；第一期只用命令行管理，不做网页后台（§3.5）。
-- 2026-10-22 · 地址簿只做新版（个人簿 + 共享簿，三级权限，按"多本 + 权限"建模，兼容接口只是外壳）；共享簿里客户端明文上传的密码加密后落盘；共享簿用命令行管理（§3.6）。同日补定：个人簿的密码哈希也加密落盘（它能直接登录对端，等同明文）；"读写"权限可以删簿内设备和标签（客户端对读写和完全控制显示同样的菜单）；Porta 也做用户组，共享簿可以授权给组。
-- 2026-10-22 · 智能路由：代价 =（发起方到中继 + 被控端到中继的延迟）× 中继权重。第一级只改服务端，用覆盖全球的 GeoIP/ASN 库估算延迟（推荐 DB-IP Lite，备选 MaxMind GeoLite，上线前用各大洲真实 IP 对比），不手写区域表；第二级由 Porta 客户端测速上报，发起方测量随打洞请求带上（新 proto 字段）；固定中继在服务端按设备配置；权重先手工固定（§3.7）。
-- 2026-10-22 · 直连：第一期开 IPv6 打洞、不开 UDP 打洞（现版 hbbs 会丢 UDP 来的 `PunchHoleSent`），服务端记录中继回落率；UDP 打洞（防伪造随机数）修不修到第三期看数据再定；WebRTC 不开（§3.8）。同日读码更正：IPv6 打洞的开关是控制端本地的 LocalConfig 选项，心跳策略改不到，被控端也不检查它；原版 hbbs 还不转发 IPv6 地址。所以第一期由 porta-server 补转发，原版客户端在控制端手动勾选"Enable IPv6 P2P connection"，Porta 客户端第二期默认打开。
-- 2026-10-22 · porta-server 第一期必须实现会合端口上的 TCP 密钥交换（KeyExchange）：原版 hbbs 没有，配了 key 又登录过 API 的客户端连它每次都在 18 秒后失败。
-- 2026-10-22 · Exit Node：出口是设备能力（新权限，和 `enable-tunnel` 分开，默认关），服务端登记出口目录，只列给主人和被授权的人；第四期做 SOCKS5/HTTP CONNECT 应用出口，复用多路复用端口转发、放开 `on_open` 的目标校验，只支持 TCP，域名交给被控端解析；默认禁止访问被控端局域网和本机，按网段放行；允许走中继并在界面标明；Porta 被控端拒绝明文裸管道；全局出口（编排 Tailscale/Headscale）不排期；不做自研 VPN（§3.9）。
+- 2026-10-22 · 客户端跟随上游正式版本合并（merge 不 rebase），服务端硬分叉。仓库：`Leapgate` 是总仓库，用子模块挂 `client/`（`leapgate-client`，rustdesk fork）和 `server/`（`leapgate-server`，rustdesk-server fork）；hbb_common 的 fork 叫 `leapgate-cardo`（拉丁语"门枢"，2026-10-22 定名），挂在两者的 `libs/hbb_common` 位置，crate 名不改。全部公开、AGPL-3.0（§3.2）。
+- 2026-10-22 · 服务端是单进程 `leapgate-server`（hbbs 硬分叉，内置 API 和路由策略，SQLite，HTTP 用 axum），hbbr 用原版、统一配 `-k`；第一期只用命令行管理，不做网页后台（§3.5）。
+- 2026-10-22 · 地址簿只做新版（个人簿 + 共享簿，三级权限，按"多本 + 权限"建模，兼容接口只是外壳）；共享簿里客户端明文上传的密码加密后落盘；共享簿用命令行管理（§3.6）。同日补定：个人簿的密码哈希也加密落盘（它能直接登录对端，等同明文）；"读写"权限可以删簿内设备和标签（客户端对读写和完全控制显示同样的菜单）；Leapgate 也做用户组，共享簿可以授权给组。
+- 2026-10-22 · 智能路由：代价 =（发起方到中继 + 被控端到中继的延迟）× 中继权重。第一级只改服务端，用覆盖全球的 GeoIP/ASN 库估算延迟（推荐 DB-IP Lite，备选 MaxMind GeoLite，上线前用各大洲真实 IP 对比），不手写区域表；第二级由 Leapgate 客户端测速上报，发起方测量随打洞请求带上（新 proto 字段）；固定中继在服务端按设备配置；权重先手工固定（§3.7）。
+- 2026-10-22 · 直连：第一期开 IPv6 打洞、不开 UDP 打洞（现版 hbbs 会丢 UDP 来的 `PunchHoleSent`），服务端记录中继回落率；UDP 打洞（防伪造随机数）修不修到第三期看数据再定；WebRTC 不开（§3.8）。同日读码更正：IPv6 打洞的开关是控制端本地的 LocalConfig 选项，心跳策略改不到，被控端也不检查它；原版 hbbs 还不转发 IPv6 地址。所以第一期由 leapgate-server 补转发，原版客户端在控制端手动勾选"Enable IPv6 P2P connection"，Leapgate 客户端第二期默认打开。
+- 2026-10-22 · leapgate-server 第一期必须实现会合端口上的 TCP 密钥交换（KeyExchange）：原版 hbbs 没有，配了 key 又登录过 API 的客户端连它每次都在 18 秒后失败。
+- 2026-10-22 · Exit Node：出口是设备能力（新权限，和 `enable-tunnel` 分开，默认关），服务端登记出口目录，只列给主人和被授权的人；第四期做 SOCKS5/HTTP CONNECT 应用出口，复用多路复用端口转发、放开 `on_open` 的目标校验，只支持 TCP，域名交给被控端解析；默认禁止访问被控端局域网和本机，按网段放行；允许走中继并在界面标明；Leapgate 被控端拒绝明文裸管道；全局出口（编排 Tailscale/Headscale）不排期；不做自研 VPN（§3.9）。
 - 2026-10-22 · 平台、签名、构建：第一阶段只做 Windows（控制端和被控端）；前两期不签名，驱动名不改、沿用上游已签名的驱动；服务端在 Linux 测试机构建；客户端先本机手工搭、固化成 PowerShell 脚本，稳定后挂 Forgejo Actions（自己的 Windows 机器当 runner），不用 GitHub Actions；产物发 Forgejo Releases（§3.11）。
 - 2026-10-22 · 不支持 Windows 7，只支持 Windows 10 及以上；构建链因此不必照搬上游为 Win7 钉的旧版 Flutter、Rust 1.75 和自编引擎。
 - 2026-10-22 · 第二期编上游现有界面的 Flutter 路线按 B → C → A 依次试：B 官方 Flutter 3.44.9 + 上游源码补丁脚本；C 自编 3.44.9 引擎只打多窗口崩溃那一处补丁；A 照搬上游 x64 的 3.24.5 + 自编引擎（`docs/research/第二期客户端/03`）。Windows 客户端只能在 Windows 上构建，在维护者本机做。
-- 2026-10-22 · 品牌：主界面的"Powered by RustDesk"用内置选项隐藏，关于页保留上游版权行并注明"基于 RustDesk"；`librustdesk.dll` 改名为 `libporta.dll`（接受每次合并上游多几处冲突）。
+- 2026-10-22 · 品牌：主界面的"Powered by RustDesk"用内置选项隐藏，关于页保留上游版权行并注明"基于 RustDesk"；`librustdesk.dll` 改名为 `libleapgate.dll`（接受每次合并上游多几处冲突）。
 - 2026-10-23 · 第三期设计（依据 `docs/research/第三期/01~03`）：
-  - Porta 客户端的心跳、sysinfo、审计改走新路径 `/api/porta/v1/`，客户端在上游代码里只加 2 处挂钩，原版客户端照走旧接口。
+  - Leapgate 客户端的心跳、sysinfo、审计改走新路径 `/api/leapgate/v1/`，客户端在上游代码里只加 2 处挂钩，原版客户端照走旧接口。
   - 设备用已有的 Ed25519 私钥（注册时上报的 `pk` 对应的那把）签每个请求，签名放请求头。服务端第一次验签通过就自动锁定这把公钥，之后换公钥的注册回 `UUID_MISMATCH`，命令行可以重置。锁定后的设备再发不签名的上报一律拒收。
-  - 路由第二级：候选中继放在 Porta 心跳响应里下发；设备每 5 分钟测一次到各中继的 TCP 建连耗时，随心跳上报；打洞请求加"发起方自己的 ID"（新 proto 字段），服务端拿这个 ID 去查发起方上报过的测量值。这偏离了方案 §3.7 原文"把测量值放进打洞请求"的写法，原因是发起连接的是界面进程，测量结果在服务进程里。
-  - 服务端用会合私钥给 Porta 心跳响应签名，客户端配了 Key 就强制验签；Porta 路径不理会"接受无效证书"选项。
+  - 路由第二级：候选中继放在 Leapgate 心跳响应里下发；设备每 5 分钟测一次到各中继的 TCP 建连耗时，随心跳上报；打洞请求加"发起方自己的 ID"（新 proto 字段），服务端拿这个 ID 去查发起方上报过的测量值。这偏离了方案 §3.7 原文"把测量值放进打洞请求"的写法，原因是发起连接的是界面进程，测量结果在服务进程里。
+  - 服务端用会合私钥给 Leapgate 心跳响应签名，客户端配了 Key 就强制验签；Leapgate 路径不理会"接受无效证书"选项。
   - 明确不做：给 UDP 注册加签名（留到退出兼容前）、公钥轮换、私钥加密存放。
 
 ## 公开与内部的边界
@@ -58,11 +58,11 @@
 - 文档里引用上游代码写成 `仓库@提交:路径` 加函数名；`upstream/` 更新到新版本后，引用要重新核对。
 
 ## 上游与许可证
-- 客户端 `rustdesk/rustdesk`、服务端 `rustdesk/rustdesk-server`（hbbs/hbbr），都是 **AGPL-3.0**（2026-10-22 核对两个仓库的 LICENSE）。Porta 作为衍生作品也是 AGPL-3.0，所有仓库公开。
+- 客户端 `rustdesk/rustdesk`、服务端 `rustdesk/rustdesk-server`（hbbs/hbbr），都是 **AGPL-3.0**（2026-10-22 核对两个仓库的 LICENSE）。Leapgate 作为衍生作品也是 AGPL-3.0，所有仓库公开。
   - 把客户端发给别人装：要同时提供对应源码。
   - 别人通过网络使用改过的服务端（AGPL 第 13 条）：要向这些用户提供源码。仓库公开就满足。
   - 不能做成闭源产品分发。
-- 名字和图标：没找到 RustDesk 官方商标政策，社区 fork 通常改名、换图标、换配置目录和服务名，避免和官方版混淆、共用状态。Porta 分发的构建里不出现 RustDesk 的名字和标志。
+- 名字和图标：没找到 RustDesk 官方商标政策，社区 fork 通常改名、换图标、换配置目录和服务名，避免和官方版混淆、共用状态。Leapgate 分发的构建里不出现 RustDesk 的名字和标志。
 
 ## 约定
 - 项目说明与知识只写本文件，不建 CLAUDE.md。
