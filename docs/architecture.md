@@ -130,7 +130,7 @@ flowchart TB
   - 如果第 7 节第 6 条说的原型做完之后换成 Slint，合并方式不变，只是分界线从 `flutter_ffi.rs` 挪到引擎里那约 20 处 `cfg(feature="flutter")` 调用，另加一个新的界面适配层（像当年的 Sciter 那样实现 `InvokeUiSession`），挂钩会多一些。
 - **服务端为什么硬分叉**：服务端一年约 40 个提交，大多是安全修补。Leapgate 要往里加 API 和路由模块，还要按 §3.1 逐步删掉兼容代码，改动又深又广，本来就合并不了。跟进方式是定期看上游 release，有安全修复就手工摘取（cherry-pick）。
 - **仓库布局**（维护者 2026-10-22 确认）：一个总仓库加三个代码仓库，全部公开，都是 AGPL-3.0。
-  - `Leapgate`（本仓库，总仓库）：放方案和决策文档、给 agent 的说明、跨仓库的构建和发版脚本。用子模块把 `client/` 挂到 `leapgate-client`、`server/` 挂到 `leapgate-server`，这样总仓库的一次提交就记下了"哪个客户端版本配哪个服务端版本"。
+  - `leapgate`（本仓库，总仓库）：放方案和决策文档、给 agent 的说明、跨仓库的构建和发版脚本。用子模块把 `client/` 挂到 `leapgate-client`、`server/` 挂到 `leapgate-server`，这样总仓库的一次提交就记下了"哪个客户端版本配哪个服务端版本"。
   - `leapgate-client`：rustdesk/rustdesk 的 fork，保留完整历史，`upstream` remote 指向官方仓库。合并上游就是在这里执行 `git merge <上游 tag>`。
   - `leapgate-server`：rustdesk/rustdesk-server 的 fork，保留完整历史。它是硬分叉，摘取上游修复直接用 `git cherry-pick`。
   - `leapgate-cardo`：hbb_common 的 fork。这个 fork 必须要有：默认服务器 `RENDEZVOUS_SERVERS = ["rs-ny.rustdesk.com"]` 和公钥 `RS_PUB_KEY` 是 `rustdesk@bd92623:libs/hbb_common/src/config.rs` 里的编译期常量【读码】，不改的话，Leapgate 客户端在没配服务器时会连到 RustDesk 官方；`rendezvous.proto` 的新字段也在这里加。
@@ -432,7 +432,7 @@ flowchart TB
 下面 9 条都在 2026-10-22 和维护者逐条确认，详细内容见各节。第 4、7 条含同日第一期开工后的补定和读码更正，已在条目里注明。
 
 1. 兼容原版客户端（§3.1）：服务端和原版 RustDesk 客户端保持协议兼容，新能力只做加法；兼容只在最初几个版本提供，兼容债务在几个迭代内清掉，退出机制见 §3.1。
-2. 分叉方式和仓库布局（§3.2）：客户端跟随上游正式版本合并，服务端硬分叉；`Leapgate` 作总仓库，用子模块挂 `leapgate-client` 和 `leapgate-server`；hbb_common 的 fork 叫 `leapgate-cardo`；全部公开，公开前先脱敏。
+2. 分叉方式和仓库布局（§3.2）：客户端跟随上游正式版本合并，服务端硬分叉；`leapgate` 作总仓库，用子模块挂 `leapgate-client` 和 `leapgate-server`；hbb_common 的 fork 叫 `leapgate-cardo`；全部公开，公开前先脱敏。
 3. 服务端形态（§3.5）：服务端做成单进程 `leapgate-server`（hbbs 分叉，内置 API 和路由策略），hbbr 用原版，第一期只用命令行管理。
 4. 地址簿（§3.6）：只做新版地址簿（含共享簿），共享簿密码加密落盘，共享簿用命令行管理。开工后补定：个人簿的密码哈希也加密落盘；"读写"可以删簿内的设备和标签，"完全控制"在客户端接口里和读写相同；做用户组，共享簿可以授权给组，组用命令行管理，从 rustdesk-api 导入时组和组规则一起导入。
 5. 智能路由（§3.7）：分两级，共用一个代价模型；第一级用 GeoIP/ASN 库估算（推荐 DB-IP Lite），不手写区域表；第二级由客户端测速、随心跳上报，打洞请求带发起方 ID，服务端查两端上报的测量（第三期实施时由"测量随打洞请求带上"改成这样）；固定中继在服务端配置；权重先用静态值。
