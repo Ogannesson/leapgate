@@ -28,6 +28,7 @@
 - 2026-10-24 · 维护者表示"如果进度快，直接用 Porta 自己做的 ICE 也行"（不依赖上游 webrtc-rs）。主会话安排：上游 WebRTC 评估照常完成（临时分支已做好，结果用来回答自研设计的关键问题），同时出自研 ICE 的设计方案（`docs/research/第三期/07-Porta自研ICE设计.md`），给维护者确认后再定走哪条。
 - 2026-10-24 · 第三期 01、02 端到端（契约 01 §6.3、02 §6.3）在 Linux 测试机上走完：两台免安装运行的 Leapgate Windows（A、B）、同机两台 hbbr 中继、Mac 上的官方 RustDesk 1.5.0 当原版客户端。01 第 1~8 步全部符合（第 7 步另起一份第一期服务端，退回旧接口）；02 第 1~4、6 步符合；第 5 步（作废规则）客户端一侧符合（`probe round dropped … not on a physical adapter`），旧测量过期后选路是 `rtt_a`，但发现服务端缺口：Leapgate 心跳不带 `probes` 时不清旧测量，要等 15 分钟过期，和契约"作废时当场清掉"不符。修复合进 leapgate-server `71b753e`（总仓库 `29f17ec`，两路审查、两条变异验证、359 个测试通过），已部署测试机并线上验证：B 关 TUN 测一轮、测量写入后再开 TUN，B 作废那一轮后 3 秒内（下一次心跳）服务端就删掉了它的测量，`route test` 当场回到估计。偏离契约原文的做法：02 第 4 步用测试机 iptables 挡 A 到一台中继（A 的 Windows 防火墙是关的）；02 第 5 步改由 B 开 TUN，期望值相应是 `rtt_a`；01 第 6~8 步放在 A 上做（在远端的 B 上改错 Key 会断开远程会话、改不回来）。
 - 2026-10-24 · 仓库名统一成全小写（维护者定）：总仓库 `Leapgate` → `leapgate`、私有仓库 `Leapgate-internal` → `leapgate-internal`，和 `leapgate-server`、`leapgate-client`、`leapgate-cardo` 一致；品牌写法 Leapgate 只用在文档和界面里。改名前的五个 Porta 仓库已归档。
+- 2026-10-24 · 镜像到 GitHub（维护者定）：自建 Forgejo 开着强制登录，外人看不到源码，不满足"全部公开"和 AGPL 第 13 条，所以四个公开仓库另推一份到 GitHub `Ogannesson/leapgate`、`leapgate-server`、`leapgate-client`、`leapgate-cardo`（普通仓库，不是 fork），服务端 `[api] source_url` 改指 GitHub。GitHub 上关掉了 Actions（构建不走 GitHub Actions，§3.11）、Wiki、Projects，三个代码仓库关掉 Issues（问题统一提到总仓库）；客户端删了上游的 `.github/FUNDING.yml`（会显示指向 RustDesk 的赞助按钮）。服务端、客户端的 README 放在 `.github/README.md`，不动上游的 `README.md`；cardo 的 README 在 main 上。同日按维护者要求把四个公开仓库的全部提交说明改写成英文、重写历史并强推 Forgejo：作者、日期、文件内容不变，子模块指针和说明里引用的哈希按对照表换成新的，上游基点（873230e、bd92623、5d52530）不变，文档里引用的旧哈希已统一替换（历史文件里仍是旧哈希）。重写前的全部分支打包在维护者本机 `~/leapgate-history-backup-20261024/`（含新旧哈希对照表），各仓库另留 `refs/backup/pre-rewrite/main`。
 
 ## 已定的架构决策（详细理由在 `docs/architecture.md`）
 - 2026-10-22 · 兼容原版 RustDesk 客户端只在最初几个版本提供；兼容带来的代价（上报接口不认证、靠 404 之类的约定判断能力、远程清中继的变通等）要在几个迭代内移除，不长期背着。退出机制见 §3.1。
@@ -69,4 +70,6 @@
 ## 约定
 - 项目说明与知识只写本文件，不建 CLAUDE.md。
 - 提交用 agent 自签。
+- 提交说明的语言（维护者 2026-10-24 定）：四个公开仓库（leapgate、leapgate-server、leapgate-client、leapgate-cardo）一律英文；私有的 `internal/`（leapgate-internal）用中文。文档本身仍是中文。
+- 推送：Forgejo 是主远端（`origin` 的 fetch 地址），GitHub 是公开镜像；各仓库和 cardo 的各个克隆都把 `origin` 配成两个 push 地址（先 Forgejo、后 GitHub），一次 `git push` 两边都推。cardo 在 GitHub 上要推 `main`、`leapgate/server`、`leapgate/client` 三个分支。新检出时照此补上：`git remote set-url --add --push origin <Forgejo 地址>`，再 `--add --push origin https://github.com/Ogannesson/<仓库名>.git`。
 - 子模块工作区用 LF：Windows 上检出后在各子模块里设 `core.eol=lf`、`core.autocrlf=false`。sqlx 迁移文件的校验和按字节算，CRLF 检出编出来的程序会和 Linux 构建的对不上。
