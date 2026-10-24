@@ -5,7 +5,7 @@
 查证日期：2026-10-22（下文 URL 均为当天访问）。对应方案 `docs/architecture.md` §3.4"怎么定"的三条标准，重点是第 2 条（hwcodec 硬解纹理零拷贝进 Slint 的 wgpu）。
 
 标注口径：
-- 【读码】附 `仓库@提交:路径` 和函数名。读的版本：`porta-client`（起点 `rustdesk@bd92623`，本地检出 `8f35d1f`）、`rustdesk-org/hwcodec@ec38eba`（客户端 `Cargo.lock` 锁的是 `febec27`，两者之间 `win.cpp` 只改了 `Query()` 的超时逻辑，格式和着色器相关代码相同，已用 GitHub compare 核对）、`flutter_gpu_texture_renderer@08a471b`（客户端 `pubspec.yaml` 钉的版本）、`slint-ui/slint@v1.18.1`（`372cf0e`）、`gfx-rs/wgpu@v30.0.1`（`40f4a34`）。
+- 【读码】附 `仓库@提交:路径` 和函数名。读的版本：`porta-client`（起点 `rustdesk@bd92623`，本地检出 `dbf3af6`）、`rustdesk-org/hwcodec@ec38eba`（客户端 `Cargo.lock` 锁的是 `febec27`，两者之间 `win.cpp` 只改了 `Query()` 的超时逻辑，格式和着色器相关代码相同，已用 GitHub compare 核对）、`flutter_gpu_texture_renderer@08a471b`（客户端 `pubspec.yaml` 钉的版本）、`slint-ui/slint@v1.18.1`（`372cf0e`）、`gfx-rs/wgpu@v30.0.1`（`40f4a34`）。
 - 【一手来源】官方文档、release、官方仓库 issue/PR，附 URL。
 - 【旁证】第三方项目、社区 PR。
 - 【推测】没有直接证据的判断，原型要验证。

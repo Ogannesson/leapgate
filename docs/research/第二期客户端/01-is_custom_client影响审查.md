@@ -3,7 +3,7 @@
 > Porta 是当时的工作名，2026-10-24 改名为 Leapgate（跃门）。
 
 - 查证日期：2026-10-22
-- 代码基线：`porta-client@8f35d1f95`，和 `rustdesk@bd92623` 只差 `.gitmodules` 一行，下文统一写 `rustdesk@bd92623:路径`；`libs/hbb_common` 在 `5d52530`。
+- 代码基线：`porta-client@dbf3af625`，和 `rustdesk@bd92623` 只差 `.gitmodules` 一行，下文统一写 `rustdesk@bd92623:路径`；`libs/hbb_common` 在 `5d52530`。
 - 标注：【读码】附文件和函数；【一手来源】附 URL；【推测】是没跑过、只按代码推的结论。
 - 对应方案：`docs/architecture.md` §3.3（改动纪律）、§3.10（品牌）、§3.11（更新相关的那句）、§5 第二期。
 

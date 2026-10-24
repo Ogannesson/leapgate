@@ -1,7 +1,7 @@
 # 第三期调研 03：心跳、sysinfo、审计改走 libs/porta 的新 API 客户端
 
 > Porta 是当时的工作名，2026-10-24 改名为 Leapgate（跃门）。
-> 2026-10-23 写。基线：客户端 `rustdesk@bd92623`（`porta-client` main 在 `ea74616`，`sync.rs`、`server/connection.rs` 和基线逐字相同），服务端 `porta-server@7c85b95`。
+> 2026-10-23 写。基线：客户端 `rustdesk@bd92623`（`porta-client` main 在 `da315ac`，`sync.rs`、`server/connection.rs` 和基线逐字相同），服务端 `porta-server@e20ca86`。
 > 标记：【读码】读代码确认；【推测】推断或估算，未编译、未实测；没有【实测】结论。
 > 设备签名的具体算法、要签哪些字段由同期的设备签名笔记定，本文只定它和 API 客户端的接口；路由第二级的测速和选路算法由路由笔记定，本文只定心跳怎么捎带它的数据。
 
@@ -58,7 +58,7 @@
 
 - `post_request(url, body, header)` = `with_tcp_proxy_fallback(post_request_http, post_request_via_tcp_proxy)`：
   - 内置选项 `use-raw-tcp-for-api=Y`、没开 WebSocket、且目标主机就是 API 主机时，直接走 TCP 代理。
-  - 否则先发 HTTP；出错或 5xx 时，如果没开 WebSocket、目标主机就是 API 主机，就改走 TCP 代理：连会合端口 21116、做 `secure_tcp`、发 `HttpProxyRequest`，总时限 `CONNECT_TIMEOUT + READ_TIMEOUT` = 36 秒。porta-server 第一期不实现 `HttpProxyRequest`（`PORTA.md` §1），所以这条回退在 Porta 部署里不会成功。不过它通常很快失败，不会白等 36 秒（核对后更正，见 §5）：porta-server 收到 `HttpProxyRequest` 时落进 `handle_tcp` 的 `_ => {}`、返回 false，连接随即关闭（`porta-server@7c85b95:src/rendezvous_server.rs` `handle_listener_inner`），客户端读到连接关闭就报错（`tcp_proxy_request` 的 `None` 分支）。只有 21116 也连不上（整机宕机、被丢包）时，才会等到建连超时 18 秒，整体最多 36 秒。另一种慢的情况是 porta-server 没持有私钥：它不先发 `KeyExchange`，客户端在 `key_exchange` 里等第一帧，要等 `READ_TIMEOUT` 18 秒（第二轮核对补充；按 `PORTA.md` §6 第 1 条，没有私钥时登录过的客户端本来就连不上，部署都会配私钥，所以这种情况只出在配错时）。
+  - 否则先发 HTTP；出错或 5xx 时，如果没开 WebSocket、目标主机就是 API 主机，就改走 TCP 代理：连会合端口 21116、做 `secure_tcp`、发 `HttpProxyRequest`，总时限 `CONNECT_TIMEOUT + READ_TIMEOUT` = 36 秒。porta-server 第一期不实现 `HttpProxyRequest`（`PORTA.md` §1），所以这条回退在 Porta 部署里不会成功。不过它通常很快失败，不会白等 36 秒（核对后更正，见 §5）：porta-server 收到 `HttpProxyRequest` 时落进 `handle_tcp` 的 `_ => {}`、返回 false，连接随即关闭（`porta-server@e20ca86:src/rendezvous_server.rs` `handle_listener_inner`），客户端读到连接关闭就报错（`tcp_proxy_request` 的 `None` 分支）。只有 21116 也连不上（整机宕机、被丢包）时，才会等到建连超时 18 秒，整体最多 36 秒。另一种慢的情况是 porta-server 没持有私钥：它不先发 `KeyExchange`，客户端在 `key_exchange` 里等第一帧，要等 `READ_TIMEOUT` 18 秒（第二轮核对补充；按 `PORTA.md` §6 第 1 条，没有私钥时登录过的客户端本来就连不上，部署都会配私钥，所以这种情况只出在配错时）。
   - 4xx 原样返回。
 - `post_request_`：reqwest 0.12，每次尝试超时 12 秒（含建连和 TLS）。`header` 参数只支持**一个** `Key: Value`。按"主机:端口"缓存 TLS 类型。请求阶段出错（`e.is_request()`，不限于 TLS 握手：reqwest 0.12.28 把连接被拒、DNS 失败、TLS 失败和 12 秒超时都归为这一类，第二轮核对补读）时的重试分两种情况（核对后更正，见 §5）。`http://` 地址不重试：TLS 类型直接取 `Plain`，只发一次。
   - **默认**（选项 `allow-insecure-tls-fallback` 没打开）：`hbb_common::tls::get_cached_tls_accept_invalid_cert` 直接返回 `Some(false)`，所以只是 rustls 失败后换 native-tls 重试一次，两次都严格校验证书，不会接受无效证书。
@@ -76,7 +76,7 @@
 
 ### 1.5 服务端第一期现状【读码】
 
-`porta-server@7c85b95`：
+`porta-server@e20ca86`：
 
 - 路由表 `src/api/mod.rs` `router`：`/api/sysinfo`、`/api/heartbeat`、`/api/audit/{conn,file,alarm}`。`is_report()` 给这几条 10 秒整请求超时；`internal_error_is_200()` 让审计的内部错误回 200 + `{"error"}`。
 - `src/api/device.rs`：
@@ -336,9 +336,9 @@ libs/porta/src/
 > 2026-10-23 独立核对，只核标【读码】的结论，没有改设计推荐；推荐所依据的事实被证伪的地方，在推荐旁注明"前提不成立，见核对记录"。
 > 对照的代码：
 > - `upstream/rustdesk@bd92623`。
-> - `porta-client@ea74616`：`main`、`p2/brand`、`p2/build` 三个分支的 `sync.rs`、`server/connection.rs` 都和基线相同。文首说"逐字相同"成立，只差检出时的换行符：upstream 检出是 CRLF，porta-client 是 LF。
-> - porta-cardo 当前检出（`6521d14`），以及 `upstream/hbb_common`。
-> - `porta-server@c79181b`：代码和 `7c85b95` 相同，只多了 `PORTA.md` 的 6 行说明。
+> - `porta-client@da315ac`：`main`、`p2/brand`、`p2/build` 三个分支的 `sync.rs`、`server/connection.rs` 都和基线相同。文首说"逐字相同"成立，只差检出时的换行符：upstream 检出是 CRLF，porta-client 是 LF。
+> - porta-cardo 当前检出（`7c05bbd`），以及 `upstream/hbb_common`。
+> - `porta-server@e73696d`：代码和 `e20ca86` 相同，只多了 `PORTA.md` 的 6 行说明。
 > - 补读了 `upstream/rustdesk-api@c5687e1`。
 
 ### 5.1 核对属实

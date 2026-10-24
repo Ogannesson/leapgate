@@ -2,7 +2,7 @@
 
 # UDP 打洞的前置障碍、UDP 出口证明、NAT 类型判断、开 TUN 时的 IPv6 直连、WebRTC/ICE 评估
 
-> 标注：【读码】读过现版源码；【实测：解密日志】笔记 05 引用的 UU 控制端日志里写着的；【推测】推断，没有实测。代码锚点对照 leapgate-client `6bb19b190`、leapgate-server `d8403ad`、leapgate-cardo 客户端线 `df76a0c` / 服务端线 `1a46681`、上游 `rustdesk@bd92623`、`rustdesk-server@873230e`。依据是 `docs/research/第三期/05-UU远程的直连与打洞.md`（下称"笔记 05"）。
+> 标注：【读码】读过现版源码；【实测：解密日志】笔记 05 引用的 UU 控制端日志里写着的；【推测】推断，没有实测。代码锚点对照 leapgate-client `68e1259fa`、leapgate-server `bff8a17`、leapgate-cardo 客户端线 `a3d96d4` / 服务端线 `375e2a3`、上游 `rustdesk@bd92623`、`rustdesk-server@873230e`。依据是 `docs/research/第三期/05-UU远程的直连与打洞.md`（下称"笔记 05"）。
 
 > **这一块改了一条已拍板的决定。** `docs/architecture.md` §3.8 原定"UDP 打洞修不修，到第三期看中继回落率再定"。笔记 05 §5 发现开源服务端从不在 UDP 上回 `TestNatRequest`，控制端的 `udp_port` 恒为 0，UDP 打洞从来没跑过，现有回落率里 UDP 打洞是零，说明不了"修了值不值"。维护者 2026-10-23 已确认按"第三期先修前置障碍"来做（README §1.1 P-1）。
 
@@ -80,7 +80,7 @@ message PunchHoleSent {
 }
 ```
 
-- 字段号按消息独立。`TestNatRequest` 现有字段只有 `serial = 1`，`TestNatResponse` 是 `port = 1`、`cu = 2`，两者从 1000 起；`PunchHoleRequest` 的 1000 已给 `leapgate_from_id`、`PunchHole` 的 1000 给了 `leapgate_nonce`，这两个新字段用 1001【读码：leapgate-cardo 客户端线 `df76a0c` `protos/rendezvous.proto`】。原版客户端、原版 hbbs 遇到它们直接忽略。
+- 字段号按消息独立。`TestNatRequest` 现有字段只有 `serial = 1`，`TestNatResponse` 是 `port = 1`、`cu = 2`，两者从 1000 起；`PunchHoleRequest` 的 1000 已给 `leapgate_from_id`、`PunchHole` 的 1000 给了 `leapgate_nonce`，这两个新字段用 1001【读码：leapgate-cardo 客户端线 `a3d96d4` `protos/rendezvous.proto`】。原版客户端、原版 hbbs 遇到它们直接忽略。
 - 文件头的号段注释（Leapgate 占 1000~1999）和 `PunchHoleRequest.leapgate_from_id = 1000` 在同一个提交里，见 README.md。
 
 ### 2.2 能力宣告和"被控端会回带 nonce"的判断

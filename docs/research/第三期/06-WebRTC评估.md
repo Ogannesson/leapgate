@@ -4,7 +4,7 @@
 > 2026-10-24 写。起因：笔记 05 发现，在"路由器透明代理只代理 TCP、本机开 TUN 代理"的环境里，网易 UU 远程能稳定局域网直连，靠的是 Google libwebrtc 的标准 ICE：两端交换全部候选地址，由客户端逐对实测。上游 RustDesk 1.5.0 起也带了一条 WebRTC 路径。维护者 2026-10-23 决定把契约 04 §3.6 的评估项提前到第三期最前面做，结果决定 03（局域网判定与候选）、04（UDP 打洞与 NAT 探测）两块怎么做。维护者的原则：**兼容性要考虑全面，不能假定任何运行环境，规则必须对所有环境都适用。**
 > 本文是评估的前半：读码和上游历史，以及给维护者照着做的实测方案。实测结果和最终建议等实测完补进来（§9 留空）。
 > 对照基线改成"现有 Porta 路径"：局域网多候选（只有 IPv4、只有 TCP）+ TCP 打洞 + IPv6 打洞 + hbbr 中继。KCP-UDP 打洞还没实现（04 块搁置），不在对照里。
-> 代码基线：`porta-client@6bb19b190`（基于上游 `rustdesk@bd92623`）、`porta-cardo@df76a0c`、`porta-server@d8403ad`；上游 `rustdesk@bd92623`、`hbb_common@ed07431`（`bd92623` 实际钉的是 `5d52530`，`webrtc.rs`、`stream.rs` 两版逐字相同，行号按 `ed07431` 引用）、webrtc-rs 的 rustdesk 分支 `rustdesk-org/webrtc@49c89bd8`（本机 cargo 缓存里的源码）。
+> 代码基线：`porta-client@68e1259fa`（基于上游 `rustdesk@bd92623`）、`porta-cardo@a3d96d4`、`porta-server@bff8a17`；上游 `rustdesk@bd92623`、`hbb_common@ed07431`（`bd92623` 实际钉的是 `5d52530`，`webrtc.rs`、`stream.rs` 两版逐字相同，行号按 `ed07431` 引用）、webrtc-rs 的 rustdesk 分支 `rustdesk-org/webrtc@49c89bd8`（本机 cargo 缓存里的源码）。
 > 标记：【读码】读代码确认（read_code）；【官方】上游官方页面、官方提交说明（official）；【旁证】第三方或社区（third_party）；【推测】推断，后面写依据（inferred）；【待实测】只能靠实测回答。网页查证日期都是 2026-10-23 或 10-24。每条结论都经过独立复核，被复核削弱的按复核后的说法写，被推翻的不用。
 
 术语：
@@ -34,14 +34,14 @@
 
 | 结论 | 出处 | 等级 |
 |---|---|---|
-| 开关是 `enable-webrtc`，存在 LocalConfig（每个用户本地的配置）里，只有控制端界面进程读它。连官方公共服务器（`rustdesk.com` 及子域）时默认开，自建服务器且用户没设过时默认关。上游里 `enable-udp-punch`、`enable-ipv6-punch` 规则相同；**Porta 把自建服务器下的 `enable-ipv6-punch` 改成默认开**，另外两个仍默认关 | `rustdesk@bd92623:src/common.rs` `get_local_option` L1308-1319、`get_webrtc_enabled` L1301；`hbb_common@ed07431:src/config.rs` `option2bool` L2826；`porta-client@6bb19b190:src/common.rs` L1317、`libs/porta/src/options.rs` `self_hosted_punch_default` | 读码 |
+| 开关是 `enable-webrtc`，存在 LocalConfig（每个用户本地的配置）里，只有控制端界面进程读它。连官方公共服务器（`rustdesk.com` 及子域）时默认开，自建服务器且用户没设过时默认关。上游里 `enable-udp-punch`、`enable-ipv6-punch` 规则相同；**Porta 把自建服务器下的 `enable-ipv6-punch` 改成默认开**，另外两个仍默认关 | `rustdesk@bd92623:src/common.rs` `get_local_option` L1308-1319、`get_webrtc_enabled` L1301；`hbb_common@ed07431:src/config.rs` `option2bool` L2826；`porta-client@68e1259fa:src/common.rs` L1317、`libs/porta/src/options.rs` `self_hosted_punch_default` | 读码 |
 | 界面上是"Enable WebRTC P2P connection"勾选项，下面缩进一个"Relay fallback delay in seconds"（`relay-fallback-delay`，默认 2.5 秒）。官方文档写的默认值是 `selfhost:N, otherwise:Y`，1.5.0、Server Pro 1.8.7 起可用 | `flutter/lib/desktop/pages/desktop_setting_page.dart` `webrtcOptions` L929-975；https://rustdesk.com/docs/en/self-host/client-configuration/advanced-settings/ | 读码；官方 |
 | 怎么预置：`enable-webrtc`、`relay-fallback-delay` 是 LocalConfig，只能构建时用 `DEFAULT_LOCAL_SETTINGS`/`OVERWRITE_LOCAL_SETTINGS` 预置或让用户勾，心跳策略改不到；`ice-servers`、`allow-webrtc-congestion-control` 是 Config，可以构建时预置，也可以由服务端心跳响应的策略下发 | `hbb_common@ed07431:src/config.rs` `LocalConfig::get_option` L2200-2208；`libs/base/src/config/keys.rs` L133-134、L219-333；`rustdesk@bd92623:src/hbbs_http/sync.rs` `handle_config_options` L292-309 | 读码 |
 | 控制端建 offer 要三条同时成立：`enable-webrtc` 为真；没配代理（`Config::is_proxy()`，指客户端设置里填了任何 proxy-url，socks5 或 http 都算；**开 TUN 不算**），因为 ICE 会绕过代理暴露真实 IP；不是"对端被设成强制中继、却没配 TURN"。offerer 在连会合服务器之前就建好，建失败打 warn `webrtc offerer setup failed` 并放弃 WebRTC | `rustdesk@bd92623:src/client.rs` `_start` L526-539、`should_create_webrtc_offerer` L604-621；`hbb_common@ed07431:src/config.rs` L1546 | 读码 |
 | 发 offer 前必须和服务端完成会合端口上的 TCP 密钥交换（KeyExchange）。做不到就丢掉 offer、打 warn `WebRTC signalling to … cannot be encrypted, punching without WebRTC`、换一条新连接照常打洞，绝不明文发信令 | `client.rs` `_start_inner` L861-886；`common.rs` `secure_tcp_required` L2341-2350；上游 `f4808b71`（#16224）提交说明 | 读码；官方 |
-| 密钥交换用客户端配置的 Key 验服务器签名；Key 为空时用内置的 `RS_PUB_KEY`。上游的内置值是官方公共服务器的公钥；**Porta 改成构建时注入 `PORTA_RS_PUB_KEY`，没注入时为空，交换立即失败**。也就是说，客户端的 Key（或构建注入的公钥）必须是所连 porta-server 的公钥，否则 offer 只留一条 warn 就被丢掉 | `common.rs` `get_key` L2111-2131、`key_exchange` L2259-2263；`porta-cardo@df76a0c:src/config.rs` `RS_PUB_KEY` | 读码 |
+| 密钥交换用客户端配置的 Key 验服务器签名；Key 为空时用内置的 `RS_PUB_KEY`。上游的内置值是官方公共服务器的公钥；**Porta 改成构建时注入 `PORTA_RS_PUB_KEY`，没注入时为空，交换立即失败**。也就是说，客户端的 Key（或构建注入的公钥）必须是所连 porta-server 的公钥，否则 offer 只留一条 warn 就被丢掉 | `common.rs` `get_key` L2111-2131、`key_exchange` L2259-2263；`porta-cardo@a3d96d4:src/config.rs` `RS_PUB_KEY` | 读码 |
 | 服务端完全不发 KeyExchange 时（比如 porta-server 只拿到公钥、没有私钥），带 offer 的那条请求要先等满 `READ_TIMEOUT` 18 秒才降级。porta-server 部署时必须持有私钥（`server/PORTA.md` §6 第 1 条本来就这样要求） | `common.rs` `key_exchange` 里的 `timeout(READ_TIMEOUT, …)`；`hbb_common@ed07431:src/config.rs` L46 | 读码 |
-| 走 WebSocket（21118）时不做密钥交换，直接放行：offer 和后续候选在控制端到服务端那一段只靠 wss 加密；服务器地址写成 IP 时客户端拼出的是明文 `ws://` | `common.rs` `secure_tcp_required` L2345-2349；`server/PORTA.md` L285；`porta-cardo@df76a0c:src/websocket.rs` `check_ws` | 读码 |
+| 走 WebSocket（21118）时不做密钥交换，直接放行：offer 和后续候选在控制端到服务端那一段只靠 wss 加密；服务器地址写成 IP 时客户端拼出的是明文 `ws://` | `common.rs` `secure_tcp_required` L2345-2349；`server/PORTA.md` L285；`porta-cardo@a3d96d4:src/websocket.rs` `check_ws` | 读码 |
 | 被控端**不查** `enable-webrtc`（LocalConfig 不经 IPC 同步到服务进程，上游有意去掉了这道检查）。只要 offer 非空、本机没配代理、不是"只走中继却没有 TURN"、同时在进行的应答不超过 16 个，就回 answer | `rustdesk@bd92623:src/rendezvous_mediator.rs` `handle_punch_hole` L1063-1076、`spawn_webrtc_answerer`、`MAX_WEBRTC_ANSWERERS` L74；上游 `ae6af2de`（#15684 合并提交）说明 | 读码；官方 |
 
 ### 2.2 一次连接怎么走
@@ -65,7 +65,7 @@ sequenceDiagram
 ```
 
 1. **控制端起两条请求竞速**【读码，`client.rs` `_start` L541-597、`request_allows_tcp_punch` L350-354】。有 offerer 时，preferred 请求带 UDP-NAT 端口、IPv6 地址和 offer；fallback 请求只做 TCP 打洞。带 offer 的那条固定 `allow_tcp_punch=false`，因为它的会合连接要留着当 ICE 信令通道。以下任一情况不发 fallback：强制中继（含 WebSocket）、`tcp_punch_allowed()` 为假（`enable-tcp-punch` 关了且 UDP、IPv6、WebRTC 至少开一个）。offer 是 `webrtc://` 加 base64 的 JSON（`type`、`sdp`、`ice_policy`），SDP 里去掉了候选行，约 700 字节；每轮打洞都重发，最多 3 轮，第 i 轮等 i×3 秒【读码，`client.rs` L925-987；`webrtc.rs` `trickle_endpoint` L993-1004、`encode_endpoint` L1010-1024】。
-2. **服务端经 UDP 把 offer 交给被控端**。被控端只用 UDP 注册（porta-server 不支持 TCP 注册），带 offer 的 `PunchHole` 约 0.8~1.1 KB，低于 1280 字节，常见链路上不会分片【读码，`porta-server@d8403ad:src/rendezvous_server.rs` `handle_tcp_punch_hole_request` L1303-1317；`webrtc.rs` `UDP_ENDPOINT_BUDGET` L973-984】。
+2. **服务端经 UDP 把 offer 交给被控端**。被控端只用 UDP 注册（porta-server 不支持 TCP 注册），带 offer 的 `PunchHole` 约 0.8~1.1 KB，低于 1280 字节，常见链路上不会分片【读码，`porta-server@bff8a17:src/rendezvous_server.rs` `handle_tcp_punch_hole_request` L1303-1317；`webrtc.rs` `UDP_ENDPOINT_BUDGET` L973-984】。
 3. **被控端回 answer 的路有两条**【读码，`rendezvous_mediator.rs` `handle_punch_hole` L1098-1171、`create_relay` L716-724】。一般情况：新建一条短 TCP，加密成功才发 `PunchHoleSent{answer}`，被控端不做 TCP 打洞；加密失败就什么都不发。`relay_v4` 时（任一端 NAT 判成对称、强制中继、本机配了代理或用 WebSocket、禁用 TCP 监听且 `udp_port<=0`），answer 放在 `RelayResponse` 里，同样要加密，失败就去掉 answer 只走中继。笔记 05 推测开 TUN 时 NAT 类型多半被测成对称，那么维护者环境里走的多半是后一条。
 4. **候选交换（trickle）**【读码，`client.rs` `spawn_webrtc_ice_bridge` L673-793、L1267-1291；`rendezvous_mediator.rs` `spawn_webrtc_answerer` L926-991、`handle_resp` L561-584】：
    - 控制端在设好 answer 之后，才在发请求的那条 TCP 上逐个发 `IceCandidate{id=被控端 ID, session_key, candidate}`，`session_key` 是 offer 的 DTLS 证书指纹。每个候选 400 ms 后补发一次，因为服务端到被控端那一段是 UDP。这条连接不重连（它的地址就是回程路由），竞速结束或连接出错就退出。
@@ -82,7 +82,7 @@ sequenceDiagram
 | preferred 请求内部，打洞路径（收到 `PunchHoleResponse`）里 UDP-KCP、IPv6、WebRTC 三者竞速，WebRTC 的超时 = max(`connect_timeout`, `relay-fallback-delay`)。`connect_timeout`：`is_local` 或对端对称 NAT 时 1 秒；没有中继服务器时 18 秒；对端 ASYMMETRIC 时，本端也是 ASYMMETRIC 用 18 秒（直连失败过则用打洞耗时×6），本端对称用 1 秒；其余用打洞耗时×6（失败过则×3），最少 1 秒。全部失败就 `request_relay` 新开中继 | `client.rs` `connect` L1428-1574 | 读码 |
 | 中继路径（收到带 answer 的 `RelayResponse`）里 IPv6、hbbr、WebRTC 三者竞速，WebRTC 等 18 秒；hbbr 结果压 2.5 秒等直连。**这条路上不管谁赢，中继都会建起来** | `client.rs` L1051-1193 | 读码 |
 | WebRTC 连上但身份握手失败：打 warn `WebRTC secure handshake failed (…), falling back to relay`，关掉这个连接，用新 uuid 重开中继（前提是有中继服务器） | `client.rs` L1207-1252、L1584-1627 | 读码 |
-| **和 Porta 局域网多候选的关系**：`porta_hooks::lan_connect` 在 `allow_tcp_punch` 为假、强制中继、或对端签名验不过时清空候选，所以开着 WebRTC 时，局域网多候选只在 fallback 那条里跑；它成功就在顶层竞速里立刻胜出、压过 WebRTC。竞速只保留第一个直连结果，不会两边都跑完，所以局域网里 Porta 的 TCP 连接通常先赢，WebRTC 失败与否被掩盖。**要单独量 WebRTC，得在控制端关掉 `enable-tcp-punch`**，这样就没有 fallback 请求 | `porta-client@6bb19b190:src/client.rs` L1371-1381、`src/porta_hooks.rs` `lan_connect` L19-48；`client.rs` `tcp_punch_allowed` L361-366 | 读码 |
+| **和 Porta 局域网多候选的关系**：`porta_hooks::lan_connect` 在 `allow_tcp_punch` 为假、强制中继、或对端签名验不过时清空候选，所以开着 WebRTC 时，局域网多候选只在 fallback 那条里跑；它成功就在顶层竞速里立刻胜出、压过 WebRTC。竞速只保留第一个直连结果，不会两边都跑完，所以局域网里 Porta 的 TCP 连接通常先赢，WebRTC 失败与否被掩盖。**要单独量 WebRTC，得在控制端关掉 `enable-tcp-punch`**，这样就没有 fallback 请求 | `porta-client@68e1259fa:src/client.rs` L1371-1381、`src/porta_hooks.rs` `lan_connect` L19-48；`client.rs` `tcp_punch_allowed` L361-366 | 读码 |
 
 ### 2.4 会话数据怎么走、身份怎么校验
 
@@ -100,11 +100,11 @@ sequenceDiagram
 | mDNS 关闭：局域网地址以明文 IP 发给对端。打开也不实用：webrtc-rs 的 mDNS 只回 A 记录，表示不了 IPv6 host 候选，上游对端也会丢弃 `.local` 候选 | `webrtc.rs` L635；fork `mdns/src/conn/mod.rs` `send_answer` L388-425 | 读码 |
 | IPv6 host 候选：每块网卡每个 /64 及更短的前缀只留一个，即系统会用作源地址的那个（开了隐私扩展时通常是临时地址）；判断不了就保留整组。这是 2026-09-19 的隐私收敛（#16263）。Windows 上 IPv6 地址字节反转的修复更早，随 #15684 首次合入时就带上了 | fork `ice/src/util/mod.rs` `ipv6_one_per_prefix`；上游 `7a367f7c`；fork `56d097c5` 说明；`rustdesk@ae6af2de:Cargo.toml` L219-220 | 读码；官方 |
 | srflx：每个地址族、每个配置的 ICE 地址（包括 TURN 地址）各开一个绑 `0.0.0.0:0` 或 `[::]:0` 的 socket 发 STUN，出口由系统路由决定，开 TUN 时进隧道 | fork `agent_gather.rs` `gather_candidates_srflx` L603-738 | 读码 |
-| 默认 4 个第三方 STUN：Cloudflare、Google、antisip、nextcloud。`ice-servers` 里没有任何 STUN 时会自动把它们加到前面，所以想不碰第三方，必须显式列一个自己的 STUN。另外，IPv6 打洞探测本机公网 IPv6 用的是写死的同一组，`ice-servers` 管不到 | `webrtc.rs` `DEFAULT_ICE_SERVERS` L160-169、`parse_ice_servers` L525-555；`porta-client@6bb19b190:src/common.rs` `test_ipv6` L2762-2850 | 读码 |
+| 默认 4 个第三方 STUN：Cloudflare、Google、antisip、nextcloud。`ice-servers` 里没有任何 STUN 时会自动把它们加到前面，所以想不碰第三方，必须显式列一个自己的 STUN。另外，IPv6 打洞探测本机公网 IPv6 用的是写死的同一组，`ice-servers` 管不到 | `webrtc.rs` `DEFAULT_ICE_SERVERS` L160-169、`parse_ice_servers` L525-555；`porta-client@68e1259fa:src/common.rs` `test_ipv6` L2762-2850 | 读码 |
 | TURN 只支持 UDP、只有 IPv4，必须带凭据（`turn://user:pass@host:port`）。TURN over TCP、TURNS（TLS）在 webrtc-ice 0.13 里没实现，走到就打 `Unable to handle URL`；`stuns:` 也被当成普通 UDP STUN。`has_turn_server()` 却把 `turns:` 算作有 TURN，只配 turns 时会建出注定失败的连接。没有默认 TURN | fork `agent_gather.rs` `gather_candidates_relay` L740-806；`webrtc.rs` `has_turn_server` L486-499 | 读码 |
 | 所有 UDP 候选的本地偏好相同，所以 host 候选不分网卡（物理、TUN、Tailscale、VMware）优先级一样；控制端对 host 对不等待，有可用对就提名最优的，平局按检查顺序。libwebrtc（UU）则按网络代价排序（以太网 0、WLAN 10、TUN 50、Tailscale 2050，笔记 05 §3.3） | fork `ice/src/candidate/candidate_base.rs` `local_preference` L326-386；`ice/src/agent/agent_selector.rs` L228-270 | 读码；"会选中 TUN 对"是推测 |
 | 检查间隔 200 ms；提名等待 host 0、srflx 500 ms、prflx 1 s、relay 2 s；被控端每对最多 74 次绑定请求（约 14.8 秒），控制端用默认 7 次。注释说被控端这个参数还在做"持久性实验" | fork `ice/src/agent/agent_config.rs` L13-38；`webrtc.rs` L557-566、L634-641 | 读码 |
-| 没有续选（renomination）和持续收集，RustDesk 也从不触发 ICE 重启。选中的对断了：ICE 5 秒后进 Disconnected，控制端 io_loop 再等 3 秒没收到数据就拆掉会话，经 `restarting-show` 自动整次重连，也就是约 8 秒后可见地重连；30 秒的 Failed 只是兜底。UU 同类情况 0.02~0.31 秒就切回去了（笔记 05 §3.2） | fork `agent_selector.rs`、`agent_config.rs`（保活 2 s、Disconnected 5 s、Failed 25 s）；`webrtc.rs` L673-678；`porta-client@6bb19b190:src/client/io_loop.rs` `WEBRTC_SUSPECT_GRACE` L24、L343-367；`flutter/lib/models/model.dart` L949-952 | 读码 |
+| 没有续选（renomination）和持续收集，RustDesk 也从不触发 ICE 重启。选中的对断了：ICE 5 秒后进 Disconnected，控制端 io_loop 再等 3 秒没收到数据就拆掉会话，经 `restarting-show` 自动整次重连，也就是约 8 秒后可见地重连；30 秒的 Failed 只是兜底。UU 同类情况 0.02~0.31 秒就切回去了（笔记 05 §3.2） | fork `agent_selector.rs`、`agent_config.rs`（保活 2 s、Disconnected 5 s、Failed 25 s）；`webrtc.rs` L673-678；`porta-client@68e1259fa:src/client/io_loop.rs` `WEBRTC_SUSPECT_GRACE` L24、L343-367；`flutter/lib/models/model.dart` L949-952 | 读码 |
 
 ## 3. porta-server 要改什么
 
@@ -112,11 +112,11 @@ sequenceDiagram
 
 | 结论 | 出处 | 等级 |
 |---|---|---|
-| 转发 `PunchHole` 时故意不带 `webrtc_sdp_offer`（和 `udp_port`），测试断言 offer 为空；`server/PORTA.md` 把"WebRTC 信令转发"列为第一期不做 | `porta-server@d8403ad:src/rendezvous_server.rs` L1188 注释、测试 L2219-2221；`server/PORTA.md` L22、§6 第 2 条 | 读码 |
+| 转发 `PunchHole` 时故意不带 `webrtc_sdp_offer`（和 `udp_port`），测试断言 offer 为空；`server/PORTA.md` 把"WebRTC 信令转发"列为第一期不做 | `porta-server@bff8a17:src/rendezvous_server.rs` L1188 注释、测试 L2219-2221；`server/PORTA.md` L22、§6 第 2 条 | 读码 |
 | `handle_hole_sent` 新建的 `PunchHoleResponse` 没拷 answer，等于丢掉；`RelayResponse` 分支把整个消息（含 answer）原样转发 | `rendezvous_server.rs` `handle_hole_sent` L963-1006、`handle_tcp` L832-872 | 读码 |
 | 回完响应就把控制端的连接从 `tcp_punch` 表里取走（`send_to_tcp` L1264、`send_to_tcp_sync` L1292 都 `remove`），之后没法再往这条连接写 | 同上 | 读码 |
 | 不认识 `IceCandidate`：`handle_tcp` 走到 `_ => {}` 返回 false，连接断开；客户端注释说的正是"不认识的服务器收到第一个候选就断开" | `rendezvous_server.rs` L903-906、L1662、L1716-1726；`client.rs` L757-761 | 读码 |
-| **同一内网时发的是 `FetchLocalAddr`**，它没有 offer 字段（回的 `LocalAddr` 也没有 answer 字段），被控端的 `handle_intranet` 完全不碰 WebRTC。只补字段转发的话，局域网场景里 WebRTC 根本不会启动 | `rendezvous_server.rs` `handle_punch_hole_request` L1176-1202；`porta-cardo@df76a0c:protos/rendezvous.proto` L203-215；`rendezvous_mediator.rs` `handle_intranet` L754-809 | 读码 |
+| **同一内网时发的是 `FetchLocalAddr`**，它没有 offer 字段（回的 `LocalAddr` 也没有 answer 字段），被控端的 `handle_intranet` 完全不碰 WebRTC。只补字段转发的话，局域网场景里 WebRTC 根本不会启动 | `rendezvous_server.rs` `handle_punch_hole_request` L1176-1202；`porta-cardo@a3d96d4:protos/rendezvous.proto` L203-215；`rendezvous_mediator.rs` `handle_intranet` L754-809 | 读码 |
 
 现状下这些都不会被触发：offer 不转发，被控端就不回 answer，控制端由 guard 关掉 offerer，preferred 那条只剩 IPv6 打洞和中继（`client.rs` L1336-1340）【读码】。
 
@@ -145,7 +145,7 @@ sequenceDiagram
 | 强制中继 | 服务端强制中继（`ALWAYS_USE_RELAY` 或网段掩码）时去掉 offer。否则 offer 声明了 `ice_policy=all`，被控端照样做完整 ICE，服务端挡不住直连。上游 PR #15684 的表 A 第 7 行也是"hbbs 清空 offer，连 TURN 也不走" | `rendezvous_mediator.rs` L1065-1076；`webrtc.rs` `encode_endpoint`；`rendezvous_server.rs` L1165-1175【读码】；PR #15684【官方】 |
 | 同一内网分支 | 带 offer 时改发 `PunchHole`、让 ICE 决定（符合"不假定运行环境"），还是扩展 `FetchLocalAddr`。前者的代价是：跨网时 host 候选也照样发出去（见下一行） | §3.1【读码】；取舍待定 |
 | 隐私 | host 候选只转给通过认证、有权限的请求方（登录的设备主人、地址簿授权，第三期签名上线后是验签通过的设备），其他人只转 srflx/relay。不改客户端 | §5.2【推测】 |
-| 连接记录 | `conn_tracker` 现在判不出 WebRTC：WebRTC 赢了可能被记成 `direct_tcp`、`direct_tcp_or_v6`、`relay`、`relay_or_v6`、`direct_lan`，看合并进来的 fallback 请求做了什么（两条请求按同一来源 IP 和被控端 ID、2 秒内合并成一次）。要加"带了 offer""answer 非空"两列（要 sqlx 迁移），真实赢家（连接类型、是否经 TURN、是否 IPv6）只有客户端知道，挂在 01 块 `/api/porta/v1/` 的上报上 | `porta-server@d8403ad:src/conn_tracker.rs` `outcome` L288-307、L397-430【读码】 |
+| 连接记录 | `conn_tracker` 现在判不出 WebRTC：WebRTC 赢了可能被记成 `direct_tcp`、`direct_tcp_or_v6`、`relay`、`relay_or_v6`、`direct_lan`，看合并进来的 fallback 请求做了什么（两条请求按同一来源 IP 和被控端 ID、2 秒内合并成一次）。要加"带了 offer""answer 非空"两列（要 sqlx 迁移），真实赢家（连接类型、是否经 TURN、是否 IPv6）只有客户端知道，挂在 01 块 `/api/porta/v1/` 的上报上 | `porta-server@bff8a17:src/conn_tracker.rs` `outcome` L288-307、L397-430【读码】 |
 | STUN（可选） | porta-server 的 UDP 端口回 STUN Binding（04 §3.6 原估几十行），客户端 `ice-servers` 指过去；IPv6 探测那条路径要另改客户端代码才能不碰第三方 | §2.5【读码】 |
 | 明文 UDP 段 | 服务端转给被控端的 `PunchHole`（含控制端的 ICE 用户名、密码、指纹）和控制端的候选（含全部网卡地址）走明文 UDP；被控端的 UDP 会合 socket 还不检查来源地址，知道它映射地址的人能伪造带 offer 的 `PunchHole` 占满 16 个应答名额。放到第三期设备签名或加密方案里一起处理，或明确接受 | `rendezvous_mediator.rs` `start_udp` L423；`rendezvous_server.rs` `send_udp` L1339-1351【读码】 |
 
@@ -179,7 +179,7 @@ sequenceDiagram
 
 - `webrtc.rs` 2844 行，L1541 起是测试，共 31 个单元测试；生产代码约 1540 行。客户端侧逻辑在 `src/client.rs`（236 处提到 webrtc）、`src/rendezvous_mediator.rs`（55 处）、`src/client/io_loop.rs`（12 处）【读码】。
 - `webrtc.rs` 文件头有一份升级检查清单，列出依赖 webrtc-rs 0.13 内部行为的地方，例如 `is_relayed`、`is_remote_ipv6` 靠解析 0.13 的 Display 字符串实现【读码，`webrtc.rs` L1-17】。
-- Porta 的 `webrtc.rs`、`stream.rs` 和上游逐字相同；`client.rs` 只多了第三期局域网多候选的 3 处挂钩，另把 `secure_connection` 改成 `pub(crate)`；`client.rs` 和 `rendezvous_mediator.rs` 里没有任何涉及 WebRTC 的改动【读码，`git diff bd92623..6bb19b190`】。
+- Porta 的 `webrtc.rs`、`stream.rs` 和上游逐字相同；`client.rs` 只多了第三期局域网多候选的 3 处挂钩，另把 `secure_connection` 改成 `pub(crate)`；`client.rs` 和 `rendezvous_mediator.rs` 里没有任何涉及 WebRTC 的改动【读码，`git diff bd92623..68e1259fa`】。
 
 ### 4.3 依赖：webrtc-rs 0.13 和 rustdesk 的分支
 
@@ -444,7 +444,7 @@ S2 是关键场景：它就是 04 §2.5.8 的缺口，现有路径预期判不�
 - 上游代码：`rustdesk@bd92623`（`src/client.rs`、`src/rendezvous_mediator.rs`、`src/common.rs`、`src/server.rs`、`src/client/io_loop.rs`、`src/port_forward.rs`、`src/hbbs_http/sync.rs`、`Cargo.toml`、`libs/base/src/config/keys.rs`、`flutter/lib/desktop/pages/desktop_setting_page.dart`）；提交 `ae6af2de`、`5b214418`、`f4808b71`、`4df7404a`、`f164c9a9`、`c0750fb5`、`7a367f7c`、`691830fe`、`692113c8`
 - `hbb_common@ed07431`（`src/webrtc.rs`、`src/stream.rs`、`src/config.rs`、`src/lib.rs`、`protos/rendezvous.proto`、`Cargo.toml`）
 - `rustdesk-org/webrtc@49c89bd8`（`ice/`、`util/src/ifaces/`、`sctp/`、`mdns/`、`webrtc/src/peer_connection/`）：https://github.com/rustdesk-org/webrtc/commits/49c89bd8d30e6e62e4c1a96cee38fdc11f79ef63
-- Porta：`porta-client@6bb19b190`（`src/client.rs`、`src/porta_hooks.rs`、`src/common.rs`、`libs/porta/src/options.rs`、`libs/porta/src/lan.rs`、`PORTA.md`）；`porta-cardo@df76a0c`；`porta-server@d8403ad`（`src/rendezvous_server.rs`、`src/conn_tracker.rs`、`PORTA.md`）
+- Porta：`porta-client@68e1259fa`（`src/client.rs`、`src/porta_hooks.rs`、`src/common.rs`、`libs/porta/src/options.rs`、`libs/porta/src/lan.rs`、`PORTA.md`）；`porta-cardo@a3d96d4`；`porta-server@bff8a17`（`src/rendezvous_server.rs`、`src/conn_tracker.rs`、`PORTA.md`）
 - 上游 PR 和 issue：https://github.com/rustdesk/rustdesk/pull/15684 ；#16372、#16653、#16605、#16676、讨论 #16613；rustdesk-server #733；https://github.com/rxxozqfoe/rustdesk-server/pull/35
 - 官方发布与文档：https://api.github.com/repos/rustdesk/rustdesk/releases/tags/1.5.0 ；https://github.com/rustdesk/rustdesk-server-pro/releases/tag/1.8.7 ；https://rustdesk.com/blog/rustdesk-1-5-0-webrtc-qos/ ；https://rustdesk.com/docs/en/self-host/client-configuration/advanced-settings/ ；https://github.com/rustdesk/rustdesk-server/commits/master
 - webrtc-rs：https://webrtc.rs/blog/2026/01/31/webrtc-v0.17.0-feature-freeze-sansio-shift.html ；https://webrtc.rs/blog/2026/07/31/announcing-webrtc-v0.20.0.html ；https://github.com/webrtc-rs/webrtc/releases/tag/v0.17.2 ；issue #101、#772；PR #812、#813；https://crates.io/api/v1/crates/webrtc/versions
