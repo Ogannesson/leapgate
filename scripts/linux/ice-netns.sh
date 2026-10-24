@@ -117,21 +117,6 @@ build_topology() {
 
     ns r1 sysctl -qw net.ipv4.ip_forward=1
     ns r2 sysctl -qw net.ipv4.ip_forward=1
-
-    # 主机不回 ICMP 端口不可达：ice_peer answer 收到第一个 SYN 就退出、关掉 socket，而 offer 选中后
-    # 在 connect 过的 socket 上连发 3 个 SYN、发完才打印 selected 行，第二个 SYN 引来的 ICMP 会让
-    # send 报 ECONNREFUSED、offer 带着错误退出，结果行就丢了。检查期间两端的 socket 都开着，不受影响。
-    # 这一步契约里没有，是绕开 ice_peer 的这个写法；ice_peer 改成先打印结果行（或不理会 send 的错误）后可以删。
-    for n in a a2 b; do
-        ns "$n" nft -f - <<'EOF'
-table ip lgice {
-    chain output {
-        type filter hook output priority filter; policy accept;
-        icmp type destination-unreachable icmp code port-unreachable drop
-    }
-}
-EOF
-    done
 }
 
 # NAT 类型照 §6.3：
