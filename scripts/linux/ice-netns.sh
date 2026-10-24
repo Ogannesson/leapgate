@@ -15,7 +15,7 @@
 #
 # 用法：sudo scripts/linux/ice-netns.sh <leapgate-server> <ice_peer>
 #   两个路径也可以用环境变量 LEAPGATE_SERVER、ICE_PEER 给。ice_peer 由
-#   `cargo build -p leapgate --example ice_peer` 编出（在 leapgate-client 里）。
+#   `cargo build -p leapgate --example ice_peer` 编出（在 leapgate-client 里）。另外要有 python3（全锥形自检用）。
 # 全部通过时退出码 0；有组没通过是 1；自检（NAT 没配对）或环境出错是 2。
 
 set -euo pipefail
@@ -121,6 +121,7 @@ build_topology() {
     # 主机不回 ICMP 端口不可达：ice_peer answer 收到第一个 SYN 就退出、关掉 socket，而 offer 选中后
     # 在 connect 过的 socket 上连发 3 个 SYN、发完才打印 selected 行，第二个 SYN 引来的 ICMP 会让
     # send 报 ECONNREFUSED、offer 带着错误退出，结果行就丢了。检查期间两端的 socket 都开着，不受影响。
+    # 这一步契约里没有，是绕开 ice_peer 的这个写法；ice_peer 改成先打印结果行（或不理会 send 的错误）后可以删。
     for n in a a2 b; do
         ns "$n" nft -f - <<'EOF'
 table ip lgice {
@@ -222,13 +223,44 @@ selftest() { # <host ns> <ip> <full|restrict|sym|none> <router>
         sym) [[ $m1 != "$m2" ]] || { echo "  NAT not set up right: $h expects symmetric, mapping is the same" >&2; exit 2; } ;;
         *) [[ $m1 == "$m2" ]] || { echo "  NAT not set up right: $h expects endpoint-independent mapping, got two" >&2; exit 2; } ;;
     esac
-    # 映射自检分不出全锥形和端口受限，全锥形另外确认 dnat 规则在
+    # 映射自检分不出全锥形和端口受限，全锥形另外实测过滤和对端无关：s2 往 wan 口发一个主机从没联系过的包，
+    # 主机必须收得到。只看规则文本抓不出 dnat 指错主机这类配错，那时 ICE 组会失败、却报成 ICE 的问题
     if [[ $type == full ]]; then
-        local rule
-        rule=$(ns "$r" nft list ruleset | grep -E 'dnat (ip )?to' | sed 's/^[[:space:]]*//')
-        [[ -n $rule ]] || { echo "  NAT not set up right: no dnat rule in $r" >&2; exit 2; }
-        echo "  selftest $r: $rule"
+        local wan from
+        if [[ $r == r1 ]]; then wan=203.0.113.11; else wan=203.0.113.12; fi
+        unsolicited "$h" "$ip" "$wan"
+        from=$(cat "$WORK/unsolicited-$h")
+        echo "  selftest $r: unsolicited packet from s2 to $wan:$UNSOLICITED_PORT reached $h from $from"
+        [[ $from == 203.0.113.2 ]] || { echo "  NAT not set up right: $r expects full cone, $h did not get the packet" >&2; exit 2; }
     fi
+}
+
+UNSOLICITED_PORT=40000
+# 主机在 <ip>:UNSOLICITED_PORT 上收，s2 往 <wan>:UNSOLICITED_PORT 发一个包；
+# 收到的包的来源地址写进 $WORK/unsolicited-<host ns>，2 秒没收到写 none
+unsolicited() { # <host ns> <ip> <wan ip>
+    local h=$1 ip=$2 wan=$3 out="$WORK/unsolicited-$1" pid i
+    ip netns exec "$P-$h" python3 -I -c '
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind((sys.argv[1], int(sys.argv[2])))
+s.settimeout(2)
+try:
+    print(s.recvfrom(64)[1][0])
+except TimeoutError:
+    print("none")
+' "$ip" "$UNSOLICITED_PORT" > "$out" &
+    pid=$!
+    PIDS+=("$pid")
+    for i in $(seq 50); do
+        ns "$h" ss -Hlun "sport = :$UNSOLICITED_PORT" | grep -q . && break
+        sleep 0.1
+    done
+    ns s2 python3 -I -c '
+import socket, sys
+socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b"x", (sys.argv[1], int(sys.argv[2])))
+' "$wan" "$UNSOLICITED_PORT"
+    wait "$pid" || true
 }
 
 # ---------- 一次检查 ----------
