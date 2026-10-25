@@ -9,11 +9,15 @@
     Deploy         unpack -Zip into -Dir (stops this deployment's processes first)
     Configure      stop, back up %APPDATA%\Leapgate\config once to -BackupDir\original, then write
                    -Server/-Key/-ApiServer, -Option (Leapgate2.toml [options]), -LocalOption
-                   (Leapgate_local.toml [options]), -Proxy ([socks]) and -Password (permanent
-                   password, Leapgate.toml). An empty value removes the entry.
-    Start          start the portable main program (resident; it also runs the controlled side)
+                   (Leapgate_local.toml [options]), -Proxy ([socks]) and the permanent password
+                   read from -PasswordFile (Leapgate.toml). An empty value removes the entry.
+    Start          start the portable main program (resident; it also runs the controlled side);
+                   -TraceIce also writes the ICE hooks' trace lines, among them the controlled
+                   side's "agent timed out"
     GetId          print this endpoint's ID
-    Connect        leapgate.exe --connect -PeerId [--password -Password]
+    Connect        leapgate.exe --connect -PeerId [--password <-PasswordFile>]; with -CancelAfterMs,
+                   stop this endpoint that long after the session starts (a true cancel: closing
+                   the session window does not stop a connection that is being set up)
     CloseSessions  post WM_CLOSE to this deployment's windows except the main window
     Stop           kill every process whose image is -Dir\leapgate.exe (nothing else)
     Logs           log lines from -Since (and before -Until) that match -Pattern
@@ -22,7 +26,12 @@
 
   -InTask runs the same call through a one-off scheduled task in the interactive session and
   prints its output. Use it where the caller must not start Leapgate itself (for example a
-  packaged app whose child processes get a redirected %APPDATA%).
+  packaged app whose child processes get a redirected %APPDATA%). Logs refuses to run where a
+  packaged app's copy of %APPDATA%\Leapgate exists, since it may be reading that copy.
+
+  The password only ever travels as a file path, so it is not in the task's argument file or in
+  this script's command line. leapgate.exe itself takes it as --password; that helper process
+  only hands the request to the main window and exits.
 #>
 [CmdletBinding()]
 param(
@@ -37,9 +46,11 @@ param(
     [hashtable]$Option = @{},
     [hashtable]$LocalOption = @{},
     [string]$Proxy,
-    [string]$Password,
+    [string]$PasswordFile,
     [string]$BackupDir,
     [string]$PeerId,
+    [int]$CancelAfterMs,
+    [switch]$TraceIce,
     [string]$Since,
     [string]$Until,
     [string[]]$Pattern,
@@ -89,6 +100,19 @@ function Stop-Own {
 }
 
 function Get-ConfigDir { Join-Path $env:APPDATA 'Leapgate\config' }
+
+function Read-Password { [IO.File]::ReadAllText($PasswordFile).Trim() }
+
+# A packaged app's processes (the Claude desktop app is one) see the app's private copy of
+# %APPDATA% over the real one, so with a copy present the logs read here could be stale.
+function Get-LogRoot {
+    $copies = @(Get-Item -Path (Join-Path $env:LOCALAPPDATA 'Packages\*\LocalCache\Roaming\Leapgate') -ErrorAction SilentlyContinue)
+    if ($copies.Count) { throw "packaged copy shadows %APPDATA%\Leapgate: $($copies.FullName -join ', '); rename it, or use -InTask" }
+    Join-Path $env:APPDATA 'Leapgate\log'
+}
+
+# Upstream's default filter (hbb_common init_log), so -TraceIce only adds the hooks module.
+$UpstreamLogSpec = 'debug,reqwest=warn,hyper_util=warn,rustls=warn,webrtc-sctp=warn,webrtc=warn,webrtc_ice::agent::agent_internal=error,webrtc::peer_connection=error'
 
 function Format-TomlValue([string]$Value) {
     if ($Value -match "['\r\n]") { throw "value must not contain a single quote or a line break" }
@@ -190,13 +214,13 @@ function Invoke-Configure {
         Set-TomlEntries (Join-Path $cfg 'Leapgate2.toml') 'socks' @{} -DropTable
     }
     if ($LocalOption.Count) { Set-TomlEntries (Join-Path $cfg 'Leapgate_local.toml') 'options' $LocalOption }
-    if ($Bound.ContainsKey('Password')) {
+    if ($PasswordFile) {
         # A plain value is read as a legacy permanent password; the program keeps it as is.
-        Set-TomlEntries (Join-Path $cfg 'Leapgate.toml') '' @{ password = $Password }
+        Set-TomlEntries (Join-Path $cfg 'Leapgate.toml') '' @{ password = (Read-Password) }
     }
     $shown = @($opts.Keys) + @($LocalOption.Keys | ForEach-Object { "local:$_" })
     if ($Bound.ContainsKey('Proxy')) { $shown += 'socks' }
-    if ($Bound.ContainsKey('Password')) { $shown += 'password' }
+    if ($PasswordFile) { $shown += 'password' }
     "configured: $($shown -join ', ')"
 }
 
@@ -223,7 +247,7 @@ function Invoke-Logs {
     $from = [DateTimeOffset]::Parse($Since)
     $to = if ($Until) { [DateTimeOffset]::Parse($Until) } else { [DateTimeOffset]::MaxValue }
     $re = [regex](($(if ($Pattern) { $Pattern } else { $DefaultPatterns }) | ForEach-Object { "(?:$_)" }) -join '|')
-    $root = Join-Path $env:APPDATA 'Leapgate\log'
+    $root = Get-LogRoot
     if (-not (Test-Path -LiteralPath $root)) { return }
     # No LastWriteTime filter: Windows does not move it while the logger keeps the file open.
     $files = Get-ChildItem -LiteralPath $root -Recurse -File -Filter *.log
@@ -243,6 +267,39 @@ function Invoke-Logs {
         } finally { $fs.Dispose() }
     }
     $out | Sort-Object At | ForEach-Object Line
+}
+
+function Get-CurrentLog { Join-Path (Get-LogRoot) 'leapgate_rCURRENT.log' }
+
+function Get-LogLength([string]$Path) {
+    if (Test-Path -LiteralPath $Path) { (Get-Item -LiteralPath $Path).Length } else { 0 }
+}
+
+# Waits for the session's start line past $Offset, then stops this endpoint -CancelAfterMs later,
+# which drops the ICE leg wherever it is.
+function Invoke-Cancel([string]$Path, [long]$Offset) {
+    $re = [regex]'^\[(\S+ \S+ \S+)\].*Session \S+ start'
+    $deadline = (Get-Date).AddSeconds(15)
+    $seen = $null
+    while (-not $seen -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 100
+        if (-not (Test-Path -LiteralPath $Path)) { continue }
+        $fs = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite, Delete')
+        try {
+            if ($fs.Length -lt $Offset) { $Offset = 0 }
+            $fs.Position = $Offset
+            $sr = [IO.StreamReader]::new($fs)
+            while ($null -ne ($l = $sr.ReadLine())) {
+                $m = $re.Match($l)
+                if ($m.Success) { $seen = $m.Groups[1].Value; break }
+            }
+        } finally { $fs.Dispose() }
+    }
+    if ($seen) { "session start seen at $seen" } else { 'no session start within 15 s' }
+    Start-Sleep -Milliseconds $CancelAfterMs
+    $n = @(Get-OwnProcess).Count
+    Stop-Own | Out-Null
+    "stopped $n process(es) at $([DateTimeOffset]::Now.ToString('o'))"
 }
 
 function Invoke-Stats {
@@ -324,6 +381,7 @@ Set-Content -LiteralPath $(& $q $doneFile) -Value `$code
     $pwsh = (Get-Process -Id $PID).Path
     $tr = "`"$pwsh`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
     if ($tr.Length -gt 261) { throw "task command is $($tr.Length) characters, over the 261 limit; use a shorter -TaskWorkDir" }
+    $code = $null
     try {
         $o = schtasks /create /tn $tag /tr $tr /sc once /st 23:59 /it /f 2>&1
         if ($LASTEXITCODE) { throw "schtasks /create failed: $o" }
@@ -334,12 +392,13 @@ Set-Content -LiteralPath $(& $q $doneFile) -Value `$code
             if ((Get-Date) -gt $deadline) { throw "task $tag did not finish within $TaskTimeoutSec s" }
             Start-Sleep -Milliseconds 300
         }
+        $code = (Get-Content -LiteralPath $doneFile -Raw).Trim()
     } finally {
+        schtasks /end /tn $tag 2>&1 | Out-Null
         schtasks /delete /tn $tag /f 2>&1 | Out-Null
+        if (Test-Path -LiteralPath $outFile) { Get-Content -LiteralPath $outFile }
+        Remove-Item -LiteralPath $argsFile, $launcher, $outFile, $doneFile -ErrorAction SilentlyContinue
     }
-    $code = (Get-Content -LiteralPath $doneFile -Raw).Trim()
-    if (Test-Path -LiteralPath $outFile) { Get-Content -LiteralPath $outFile }
-    Remove-Item -LiteralPath $argsFile, $launcher, $outFile, $doneFile -ErrorAction SilentlyContinue
     if ($code -ne '0') { throw "task $tag failed" }
 }
 
@@ -357,8 +416,10 @@ switch ($Action) {
     'Configure' { Need 'Dir'; Invoke-Configure }
     'Start' {
         Need 'Dir'
+        # flexi_logger takes RUST_LOG over its built-in filter.
+        if ($TraceIce) { $env:RUST_LOG = "$UpstreamLogSpec,librustdesk::leapgate_hooks=trace" }
         $p = Start-Process -FilePath (Get-Exe) -WorkingDirectory $Dir -PassThru
-        "started pid $($p.Id)"
+        "started pid $($p.Id)$(if ($TraceIce) { ' with ICE trace' })"
     }
     'GetId' {
         Need 'Dir'
@@ -371,9 +432,11 @@ switch ($Action) {
     'Connect' {
         Need 'Dir'; Need 'PeerId'
         $a = @('--connect', $PeerId)
-        if ($Password) { $a += @('--password', $Password) }
+        if ($PasswordFile) { $a += @('--password', (Read-Password)) }
+        if ($CancelAfterMs) { $log = Get-CurrentLog; $offset = Get-LogLength $log }
         Start-Process -FilePath (Get-Exe) -ArgumentList $a -WorkingDirectory $Dir | Out-Null
         "connect $PeerId requested at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff')"
+        if ($CancelAfterMs) { Invoke-Cancel $log $offset }
     }
     'CloseSessions' { Need 'Dir'; Invoke-CloseSessions }
     'Stop' { Need 'Dir'; Stop-Own }
