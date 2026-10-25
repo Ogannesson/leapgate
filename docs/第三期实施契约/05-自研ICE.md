@@ -681,7 +681,7 @@ G 是 A（controlling）那一端候选的优先级，D 是 B 那一端的。两
 
 | 常数 | 值 | 理由 |
 |---|---|---|
-| `ICE_VER` | 1 | `LeapgateIce.ver`；不认识的版本 S 回 `BAD`、B 丢弃 |
+| `ICE_VER` | 1 | `LeapgateIce.ver`；不认识的版本：S 对 OFFER、ANSWER 回 `BAD`，对 REJECT、RESULT 忽略（§2.3 开头）；B 丢弃 |
 | `SESSION_LEN` | 16 字节 | 128 位随机数，猜不中 |
 | `OFFER_DOMAIN` | `b"leapgate-ice-offer-v1\0"` | §2.5 |
 | `OFFER_TS_WINDOW_SECS` | 40 | 残余时钟偏差 30 秒（`MAX_SKEW`）+ 传输余量 10 秒，§2.5 |
@@ -1481,7 +1481,7 @@ ICE 只在"两端都是含本块的 Leapgate、服务端是含本块的 leapgate
 | B 便携运行 | mediator、心跳、FORWARD 处理都在界面进程里，ICE 照常应答；`MAX_AGENTS` 和去重表也在这个进程里。没有安装时加的防火墙放行规则，第一次收包时 Windows 防火墙可能弹提示【待实测，§6.4 第 7 步】 |
 | 两端只有 IPv6，或只有 IPv4 | 地址族各自配对，有哪一族用哪一族 |
 | 会合服务器没有 IPv6 地址（只有 A 记录，或用 `-b` 只绑了 IPv4） | 没有 IPv6 srflx；全局 IPv6 host 候选照常（§4.3） |
-| 本机开着 fake-ip 的 TUN（mihomo、Clash），会合服务器配的是域名 | 物理网卡 DNS 给出真实地址，srflx 照常（F1，§4.3）；网卡没有可用的 DNS 服务器时退回系统解析，假地址被丢掉，这一次没有 srflx。【推测：只有单元测试（回环上的假 DNS 服务器），没在开 fake-ip 的真实 Windows 上验过，由 §6.4 覆盖】 |
+| 本机开着 fake-ip 的 TUN（mihomo、Clash），会合服务器配的是域名 | 物理网卡 DNS 给出真实地址，srflx 照常（F1，§4.3）；网卡没有可用的 DNS 服务器时退回系统解析，假地址被丢掉，这一次没有 srflx。【推测：只有单元测试（回环上的假 DNS 服务器），以及审查时在维护者开着 fake-ip 的机器上直接调 `resolve` 拿到了真实地址；端到端由 §6.4 第 10 步覆盖】 |
 | 路由器自己做 fake-ip（例如 OpenClash 的 fake-ip 模式） | 网卡 DNS 和系统解析给的都是假地址，都被丢掉，没有 srflx，只剩 host 和 prflx，不通就干净回落（§9 第 22 条） |
 
 ## 6. 测试
@@ -1581,7 +1581,7 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
   - `ice_peer --probe <本机地址> <STUN 地址>...`：从绑在本机地址上的同一个 socket 依次问各个服务器，每个打印一行 `mapped <地址>` 或 `mapped none`。
   - `ice_peer offer <本机地址> <STUN 地址>`（A）：先打印自己的 `params <十六进制>`（`LeapgateIceParams` 序列化后），再从标准输入读 B 的那一行，跑检查，打印 `selected <本端类型>/<地址族> <-> <对端类型>/<地址族> in <N> ms`（N 从 `Offer::run` 开始算）或 `no_pair`。选中后在选中的 socket 上 `connect`，隔 100 毫秒发 3 个 SYN 形状的包，发送出错忽略（B 收到第一个就退出，后面的会引来 ICMP 端口不可达）。
   - `ice_peer answer <本机地址> <STUN 地址>`（B）：先读 A 的一行，再打印自己的，收到 SYN 形状的包打印 `accepted`，到 `AGENT_TTL` 没收到打印 `timed_out`。
-  - 每种结果的退出码都是 0，用法或参数解析错误是 2，脚本按标准输出判结果。脚本给两端的 STUN 地址都是 s1 `203.0.113.1:21116`。
+  - 每种结果（选中、`no_pair`、`accepted`、`timed_out`）的退出码都是 0；用法、参数或对端参数解析错误，以及选中后 `connect` 失败（这时还没打印 selected 行），退出码是 2。脚本按标准输出判结果。脚本给两端的 STUN 地址都是 s1 `203.0.113.1:21116`。
 - 示例程序用 `gather_on(&[LocalAddr::new(<本 netns 的地址>, 0)], ..)` 收集（Linux 上 `nics()` 枚举不到网卡，所以示例程序直接给地址），参数经脚本的 fifo 在两个进程之间转交，不经 S 的信令，收方用 `AnswerParams::parse` 解（这里的地址都不属于"丢弃"类）。会合服务器是 IP 字面量，所以 F1 的域名解析不在这个测试里，只有 §6.2 的单测覆盖。
 - NAT 类型（每组 r1、r2 用同一种或按下表组合；以脚本自检为准）：
   - 全锥形（映射和过滤都和对端无关）：一对一映射，`snat` 把 `192.168.x.10` 换成 wan 地址、端口不变，`dnat` 把到 wan 地址的 UDP 全部转回 `192.168.x.10`。
@@ -1601,7 +1601,7 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
 
   原稿这张表标的是【推测】，6 组 × 3 次全部符合，整套约 70 秒，退出码 0，选中的组 B 每次都 `accepted`、两端都正常退出。NAT 组一律约 324 毫秒，是 `NOMINATE_WAIT_OTHER`（300 毫秒）加检查往返，不是丢包重发。实施过程中同一组结果在不同版本上复跑过多次，都一致。
 - 每组跑 3 次，"选中"的组 3 次都要选中，"`no_pair`"的组 3 次都要在 `CHECK_TIMEOUT` 加 1 秒内结束、进程正常退出。每组重建整套 netns（conntrack 一起清掉）；脚本退出时（含中途失败、Ctrl-C）清掉所有 netns 和后台进程，NAT 规则都在 netns 里、随之删除，不碰根 netns。跑完核对过：没有残留的 netns 和 `ice_peer`，根 netns 的 nftables 表和跑前相同。
-- 依赖：`cargo build -p leapgate --example ice_peer` 在测试机上编得过（原标【待实测】，2026-10-25 实测：不用补系统库、不改代码，第一次编译约 6 分钟）；C3（`5bca92970`）时在测试机上跑过 `cargo test -p leapgate`，87 个全部通过（只缺 Windows 专属的那一条），之后的版本只在 Windows 上跑全量。
+- 依赖：`cargo build -p leapgate --example ice_peer` 在测试机上编得过（原标【待实测】，2026-10-25 实测：不用补系统库、不改代码，第一次编译约 6 分钟）；最终版本（`fa090f666`）在测试机上跑 `cargo test -p leapgate`，95 个全部通过（Windows 上是 97 个，差的两条是 Windows 专属的）。
 - 早期版本的 `ice_peer` 每次发 SYN 都用 `?`，B 退出后的 ICMP 让 A 以退出码 2 结束、丢掉结果行，脚本曾在主机上丢弃出站 ICMP 绕开它；示例程序改成忽略这几次发送的错误后（`9b59485fc`），脚本里的这段已删（`785a93d`），上面的实测是删掉以后的结果。
 
 ### 6.4 端到端验收（维护者）
@@ -1626,9 +1626,10 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
 6. **S5 IPv6 和 srflx 对照**：外地设备在"有 IPv6"和"网卡上临时取消 IPv6"两种状态下各连 5 次。有 IPv6 时期望 `host/v6 <-> host/v6`；取消后期望 IPv4 对、至少一端是 `srflx` 或 `prflx`（这一路就是 Q5 要验的 srflx）。取消 IPv6 后如果外地网络是对称 NAT、选不中，照实记录选中失败的 `outcome` 和服务端 `ice_result`，连接经中继完成即可，不算不通过。
 7. **默认 Windows 防火墙**：找一台 Windows 防火墙为默认设置（域、专用、公用三个配置文件都开着）的机器当 B（笔记 06 实测用的机器防火墙都关着，代表不了普通用户），重复 S1（5 次）和 S3（5 次），安装版、便携版各一轮。记录便携版第一次收到连接时有没有弹防火墙提示、点允许之前和之后 ICE 能不能选中。安装版期望和防火墙关着时一样（安装时加了按程序路径、不限协议的放行规则，`src/platform/windows.rs` L1627~1628【读码】）；便携版的行为【待实测】，结果写回 §9 第 2 条。
 8. **50 次连接断开**：A → B 50 次，每次出画面后停 10~20 秒再关窗口；每第 5 次（第 5、10、…、50 次，共 10 次，多于 `MAX_AGENTS`）改成在"正在连接"时就关（走取消路径）。第 50 次之后等 15 秒（超过 `AGENT_TTL`），再连 5 次。全程不能出现 `leapgate ice: no direct path (no_answer)`：B 名额满时静默丢弃 FORWARD（§4.8.2），10 次取消里漏掉 8 个以上名额就会出现。第 10 次和第 50 次时记 B 进程的句柄数、线程数、专用字节，第 50 次不比第 10 次多出 20% 以上。全程无崩溃、无超过 30 秒既不报错也不回落的卡死。
-9. **回落**：(a) A 连一台原版或 0.3.0 的 Leapgate 被控端：控制端日志有 `leapgate ice: rejected (unsupported), falling back`，连接经上游照常完成；(b) 服务端控制台 `aur Y` 打开强制中继后连一次：`rejected (relay)`，连接走中继，测完 `aur N`；(c) A 的客户端设置里配一个代理后连一次：控制端日志里没有任何 `leapgate ice:` 行；(d) B 配一个包含 A 公网 IP 的 IP 白名单后连一次：`rejected (unsupported)`，连接经上游照常完成，测完清掉白名单。
+9. **回落**：(a) A 连一台原版或 0.3.0 的 Leapgate 被控端：控制端日志有 `leapgate ice: rejected (unsupported), falling back`，连接经上游照常完成；(b) 服务端控制台 `aur Y` 打开强制中继后连一次：`rejected (relay)`，连接走中继，测完 `aur N`；(c) A 的客户端设置里配一个代理后连一次：控制端日志里没有任何 `leapgate ice:` 行；(d) B 配一个包含 A 公网 IP 的 IP 白名单后连一次：`rejected (unsupported)`，连接经上游照常完成，测完清掉白名单；(e) A 把"UDP 打洞"（`enable-udp-punch`）和"IPv6 P2P"（`enable-ipv6-punch`）都关掉后连一次：控制端日志里没有任何 `leapgate ice:` 行（F2），测完改回。
+10. **fake-ip 下的 srflx**（F1，2026-10-25 加）：两端的会合服务器改填一个指向测试机的域名（可以用 sslip.io 这类把 IP 写进域名的公共通配 DNS，不用另配记录），开 mihomo 的 fake-ip TUN。先在 A 上用 `Resolve-DnsName` 确认系统解析这个域名得到的是 `198.18/15` 的地址；然后按第 6 步"取消 IPv6"那一半连 5 次，期望和第 6 步相同（IPv4 对、至少一端是 `srflx` 或 `prflx`；外地网络是对称 NAT、选不中时照实记录）。F1 不生效时两端都没有 srflx，跨 NAT 的 IPv4 对一个也选不中。
 
-判定通过：1~9 全部符合（第 6 步的对称 NAT 情况按上面写的口径）。
+判定通过：1~10 全部符合（第 6、10 步的对称 NAT 情况按上面写的口径）。
 
 ## 7. 明确不做
 
@@ -1687,8 +1688,8 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
     - 解析整体只有 `RESOLVE_WAIT`（200 毫秒），同时卡住系统解析：不开 TUN 时系统冷解析超过 200 毫秒，这一次没有 srflx；网卡 DNS 连不通而系统先答出来时，要等到 200 毫秒才用系统的答案，Binding 少发一次。
     - 网卡 DNS 不读 hosts 文件：hosts 把会合服务器域名指到别处时，信令连接用 hosts 的地址，srflx 的 Binding 发往网卡 DNS 给的地址，可能没有 srflx 或证明对不上。
     - 会合服务器名字解析到回环或 `198.18/15` 时一律没有 srflx（原稿会往那里发一个注定没有回音的 Binding）。
-    - 没在开 fake-ip 的真实 Windows 上端到端验过，靠 §6.4 覆盖。
-23. **控制端启用条件 `ice_enabled` 没有单元测试**：复核时的变异（去掉可信 Key 那一条）存活。它读全局配置（`LocalConfig`、能力缓存），按 `client/AGENTS.md` Tests 节不为它加测试钩子，由 §6.4 第 9 步的回落项覆盖。
+    - 没在开 fake-ip 的真实 Windows 上端到端验过，由 §6.4 第 10 步覆盖。
+23. **控制端启用条件 `ice_enabled` 没有单元测试**：复核时的变异（去掉可信 Key 那一条）存活。它读全局配置（`LocalConfig`、能力缓存），按 `client/AGENTS.md` Tests 节不为它加测试钩子。端到端只覆盖了其中两条：配了代理（§6.4 第 9 步 (c)）和两个打洞开关（第 9 步 (e)）；可信 Key、只允许入站、`other_server`、直连 IP、`disable-udp` 这几条没有专门的验收步骤。
 
 ## 10. 工作量
 

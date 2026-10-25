@@ -154,7 +154,7 @@ D 步动到的已有文件（05 内部再拆给几个 coder 时，同一个文�
 | Leapgate 控制端 → 原版被控端、低于 0.3.1 的 Leapgate 被控端、或设备公钥还没被锁定的被控端（服务端含 05） | 服务端回 `REJECT{UNSUPPORTED}`，ICE 腿在信令连接上当场失败，上游路径照常（05 §2.4） |
 | 原版控制端 → Leapgate 被控端 | 原版不发 OFFER，被控端不受影响 |
 | 控制端便携运行（服务进程没跑） | 界面进程会在本进程里起服务，心跳和能力缓存照常，ICE 照常；只有带 `no_server` 启动、只当控制端用时缓存为空，不启动 ICE（05 §5）。被控端便携运行时心跳和 OFFER 都在界面进程里处理，ICE 照常应答 |
-| 普通路径以外的连接（`id@server?key=`、直连 IP、强制中继、WebSocket、配了代理、`disable-udp`、没有可信 Key） | 控制端不启动 ICE，只跑上游路径。被控端开代理、WebSocket 或 `disable-udp` 时，服务端判它不在线（回 `OFFLINE`），或它自己回 `REJECT{UNSUPPORTED}`（05 §2.3） |
+| 普通路径以外的连接（`id@server?key=`、直连 IP、强制中继、WebSocket、配了代理、`disable-udp`、没有可信 Key、`enable-udp-punch` 和 `enable-ipv6-punch` 都关（05 F2）） | 控制端不启动 ICE，只跑上游路径。被控端开代理、WebSocket 或 `disable-udp` 时，服务端判它不在线（回 `OFFLINE`），或它自己回 `REJECT{UNSUPPORTED}`（05 §2.3） |
 | 被控端配了 IP 白名单（非空、不含 `0.0.0.0`） | 被控端回 `REJECT{UNSUPPORTED}`，只走上游路径：白名单按 ICE 选中的地址判可能拒掉以前能连上的连接，而 ICE 胜出后不再回落（05 §4.8.2） |
 | 服务端没有会合私钥（`-k` 只给了公钥） | 签不了 Leapgate 心跳响应，配了 Key 的控制端能力缓存写不进 `ice`，不启动 ICE（05 §2.4）。这种部署本来就连不上登录过的客户端（`server/LEAPGATE.md` §6 第 1 条） |
 | 能力缓存所在的 API 地址和会合服务器不是同一台 | 已知限制，干净失败：会合服务器是原版 hbbs 时它不做密钥交换，信令连接到超时（3 秒）失败；是不含 05 的 leapgate-server 时收到 OFFER 就断开连接；反过来就不启动 ICE，少一条路（05 §2.12） |
