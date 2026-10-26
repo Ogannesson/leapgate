@@ -27,7 +27,8 @@
     peer-stats-*.txt the controlled side's Stats output, copied into the report as is
 
   Classes: ice-selected (log line and a matching connected row), upstream-direct-won,
-  ice-lost-relay-window (no ICE line, row abandoned, upstream gave a relay), ice-failed, no-ice
+  ice-lost-relay-window ("lost the relay window" line and an abandoned row; "(no log line)" when
+  only the row and the upstream relay show it), ice-failed, no-ice
   (no ICE line and no row: ICE did not start), mismatch, unclassified; for cancel rounds
   cancel-confirmed, cancel-too-late (ICE was selected), cancel-too-early (no row: the OFFER never
   reached the server), cancel-dropped (the controlled side dropped the FORWARD), cancel-unconfirmed.
@@ -76,6 +77,7 @@ function Get-Class($Rec, $Rows, $Peer) {
     $txt = @($Rec.lines) -join "`n"
     $sel = [regex]::Match($txt, 'leapgate ice: selected (\w+)/v(\d)/(\w+) <-> (\w+)/v\d in (\d+) ms')
     $fail = [regex]::Match($txt, 'leapgate ice: (no direct path \(\w+\)|rejected \(\w+\)|signaling failed)')
+    $lost = $txt -match 'leapgate ice: lost the relay window after \d+ ms'
     $direct = $txt -match 'used to establish IPv6 connection|LAN candidate .* won'
     $relay = $txt -match 'used to establish Relay connection'
     $outcomes = @(if ($null -ne $Rows) { $Rows | ForEach-Object { $_.outcome } })
@@ -101,13 +103,17 @@ function Get-Class($Rec, $Rows, $Peer) {
     }
     if ($fail.Success) { return "ice-failed: $($fail.Groups[1].Value)" }
     if ($null -eq $Rows) {
+        if ($lost) { return 'ice-lost-relay-window (server not checked)' }
         return $(if ($direct) { 'upstream-direct-won (server not checked)' } else { 'no ICE line (server not checked)' })
     }
-    if (-not $outcomes.Count) { return 'no-ice' }
+    if (-not $outcomes.Count) { return $(if ($lost) { 'mismatch' } else { 'no-ice' }) }
     if (($outcomes -join ',') -eq 'abandoned') {
+        if ($lost) { return 'ice-lost-relay-window' }
         if ($direct) { return 'upstream-direct-won' }
-        if ($relay) { return 'ice-lost-relay-window' }
+        # Builds before the log line (client e321ccf9e) said nothing when ICE lost the window.
+        if ($relay) { return 'ice-lost-relay-window (no log line)' }
     }
+    if ($lost) { return 'mismatch' }
     'unclassified'
 }
 
@@ -157,14 +163,16 @@ function Invoke-Report {
     $counts = [ordered]@{}
     for ($k = 0; $k -lt $recs.Count; $k++) {
         $r = $recs[$k]
-        $rows = if ($null -eq $rowsBy) { $null } elseif ($rowsBy.ContainsKey($k)) { @($rowsBy[$k]) } else { @() }
+        # The comma keeps an empty array from unrolling to $null, which would read as "not checked".
+        $rows = if ($null -eq $rowsBy) { $null } elseif ($rowsBy.ContainsKey($k)) { @($rowsBy[$k]) } else { , @() }
         $peer = if ($null -eq $peerBy) { $null } elseif ($peerBy.ContainsKey($k)) { @($peerBy[$k]) -join "`n" } else { '' }
         $cls = Get-Class $r $rows $peer
         $counts[$cls] = 1 + $(if ($counts.Contains($cls)) { $counts[$cls] } else { 0 })
         $ice = (@($r.lines) | Where-Object { $_ -match 'leapgate ice:' } | ForEach-Object { $_ -replace '^.*leapgate ice: ', '' }) -join ' / '
         $rowText = if ($null -eq $rows) { '-' } else { (@($rows) | ForEach-Object { "#$($_.id) $($_.outcome) $($_.elapsed) $($_.local_kind)/$($_.remote_kind)/$($_.family)/$($_.local_net)" }) -join '; ' }
         $at = [DateTimeOffset]::FromUnixTimeMilliseconds($starts[$k]).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss.fff')
-        $out.Add("R$($r.round) $at $(if ($r.cancel) { 'cancel' } else { 'normal' }) $cls login=$($r.login) | A: $ice | server: $rowText")
+        $re = if ($r.PSObject.Properties['restarted'] -and $r.restarted) { '(main program restarted first) ' } else { '' }
+        $out.Add("R$($r.round) $at $re$(if ($r.cancel) { 'cancel' } else { 'normal' }) $cls login=$($r.login) | A: $ice | server: $rowText")
         if ($r.cancel) { $out.Add("    A: $(@($r.connect) -join ' / ')") }
         if ($peer) { foreach ($p in $peer -split "`n") { $out.Add("    B: $p") } }
     }
@@ -191,10 +199,19 @@ function Invoke-Rounds {
     $task = @{}
     if ($InTask) { $task.InTask = $true }
     $waitFor = if ($PasswordFile) { 'handle_peer_info' } else { 'leapgate ice: |used to establish' }
+    $exe = [IO.Path]::GetFullPath((Join-Path $Dir 'leapgate.exe'))
     $first = [DateTimeOffset]::Now
     "rounds R$From..R$To from $($first.ToString('o')) (unix ms $($first.ToUnixTimeMilliseconds()))"
     for ($i = $From; $i -le $To; $i++) {
         $cancel = $CancelEvery -gt 0 -and $i % $CancelEvery -eq 0
+        # With the main program gone (it can crash), --connect finds no window to hand over to and
+        # runs the session in a process of its own, and a cancel round watches a log nobody writes.
+        $restarted = -not @(Get-Process -Name leapgate -ErrorAction SilentlyContinue |
+                Where-Object { $_.Path -and [string]::Equals($_.Path, $exe, [StringComparison]::OrdinalIgnoreCase) }).Count
+        if ($restarted) {
+            & $Script -Action Start -Dir $Dir @task | Out-Null
+            Start-Sleep -Seconds $RestartWaitSec
+        }
         $start = [DateTimeOffset]::Now
         $c = @{ Action = 'Connect'; Dir = $Dir; PeerId = $PeerId }
         if ($PasswordFile) { $c.PasswordFile = $PasswordFile }
@@ -213,12 +230,12 @@ function Invoke-Rounds {
         $lines = @(Get-Lines $start)
         $login = @($lines -match 'handle_peer_info').Count -gt 0
         $rec = [ordered]@{
-            round = $i; cancel = $cancel; peer = $PeerId; start = $start.ToString('o')
+            round = $i; cancel = $cancel; restarted = $restarted; peer = $PeerId; start = $start.ToString('o')
             end = [DateTimeOffset]::Now.ToString('o'); login = $login; connect = $connect; lines = $lines
         }
         Add-Content -LiteralPath $roundsFile -Encoding utf8 -Value ($rec | ConvertTo-Json -Compress -Depth 3)
         $ice = ($lines | Where-Object { $_ -match 'leapgate ice:' } | ForEach-Object { $_ -replace '^.*leapgate ice: ', '' }) -join ' / '
-        "R$i $($start.ToString('HH:mm:ss')) $(if ($cancel) { 'cancel' } else { 'normal' }) $(Get-Class ([pscustomobject]$rec) $null $null) login=$login :: $ice"
+        "R$i $($start.ToString('HH:mm:ss')) $(if ($restarted) { '(main program was gone, restarted) ' })$(if ($cancel) { 'cancel' } else { 'normal' }) $(Get-Class ([pscustomobject]$rec) $null $null) login=$login :: $ice"
     }
 }
 
