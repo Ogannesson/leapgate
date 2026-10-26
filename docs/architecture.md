@@ -349,7 +349,7 @@ flowchart TB
 
 ### 3.10 品牌
 
-- 运行时变量 `APP_NAME` 和 `ORG`（`rustdesk@bd92623:libs/hbb_common/src/config.rs`）决定 Windows 服务名、注册表项、安装路径、配置目录和 URL scheme（`leapgate://`）【读码】。这些改掉以后，Leapgate 和原版 RustDesk 可以装在同一台机器上共存，过渡期很方便。
+- 运行时变量 `APP_NAME` 和 `ORG`（`rustdesk@bd92623:libs/hbb_common/src/config.rs`）决定 Windows 服务名、注册表项、安装路径、配置目录和 URL scheme（`leapgate://`）【读码】。这些改掉以后，Leapgate 和原版 RustDesk 可以装在同一台机器上共存，过渡期很方便。指向同一服务器时两边默认 ID 会撞（都按第一块网卡的 MAC 算），Leapgate 首次生成 ID 时加盐（`client/LEAPGATE.md` §6，2026-10-27 补）。
 - 翻译不用逐条改：`src/lang.rs` 的 `fn translate_locale` 在运行时会把译文里的 "RustDesk" 换成当前的应用名【读码】。
 - 要手工改的写死位置：exe 和 dll 的文件名、各平台的包 ID（`com.carriez.flutter_hbb`）、MSI 打包参数、`res/` 下的打包脚本和图标。默认服务器和公钥的修改见 §3.2 的 hbb_common fork。
 - 只改默认服务器还不够：`api-server` 和自定义 ID 服务器都没配时，上游的 API 地址兜底到写死的 `https://admin.rustdesk.com`（`rustdesk@bd92623:src/common.rs` `fn get_api_server_`），不随 `RENDEZVOUS_SERVERS` 变，登录、地址簿的请求会发到 RustDesk 官方；`fn using_public_server` 也只看自定义服务器，主页会显示指向官方定价页的提示【读码】。Leapgate 已用挂钩处理：兜底地址改由 `libs/leapgate` 的 `leapgate::brand::default_api_server()` 给出，优先用构建时注入的 `LEAPGATE_API_SERVER`，没设时按同样的规则从内置会合服务器推导，两者都没有就返回空串；`using_public_server` 在 Leapgate 里恒为假【读码】。
@@ -418,7 +418,7 @@ flowchart TB
   - 路由第二级（客户端测速上报）和设备签名。（2026-10-24 已完成：契约 01、02 合入，端到端在测试机上走完。）
   - UDP 打洞（加防伪造随机数，§3.8）做不做，看第一期以来的中继回落率再定。（2026-10-24 改定：直连改走自研 ICE，含 host 和 srflx 候选、服务端 STUN 和反射地址证明、OFFER 签名并加密、KCP 交接、和现有路径竞速，契约 05；上游 UDP 打洞不修。续选、ICE-TCP 是完整版，另起契约。）
   - 心跳、sysinfo、审计改走 `libs/leapgate` 的新 API 客户端（在 `sync.rs` 里加挂钩，上游调用关掉、不删）。（2026-10-24 已完成，随契约 01。）
-  - 共存 ID 加盐：同一台机器装原版和 Leapgate、指向同一服务器时默认 ID 会撞，Leapgate 首次生成 ID 时加盐（契约 03 收缩后只剩这一项，§3.10）。（2026-10-24 补。）
+  - 共存 ID 加盐：同一台机器装原版和 Leapgate、指向同一服务器时默认 ID 会撞，Leapgate 首次生成 ID 时加盐（契约 03 收缩后只剩这一项，§3.10）。（2026-10-24 补。2026-10-27 已实现。）
 - **第四期：应用出口**
   - 先实测多路复用隧道的吞吐，再做出口权限、出口目录、本地 SOCKS5 和访问控制。
 - **并行轨道：新界面**（第二期完成后开始）
