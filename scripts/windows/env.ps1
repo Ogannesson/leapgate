@@ -1,7 +1,8 @@
 #Requires -Version 7.0
 # Leapgate Windows 客户端构建链的公共部分：钉住的版本、目录布局、进程内环境。
-# 由 setup-toolchain.ps1 和 build-client.ps1 点源（. "$PSScriptRoot\env.ps1"），不单独运行。
-# 依据：docs/research/第二期客户端/03-Windows构建链方案.md（方案 B：官方 Flutter 3.44.9 + 上游源码补丁脚本）。
+# 由 setup-toolchain.ps1、build-client.ps1、build-engine.ps1 点源（. "$PSScriptRoot\env.ps1"），不单独运行。
+# 依据：docs/research/第二期客户端/03-Windows构建链方案.md（方案 B：官方 Flutter 3.44.9 + 上游源码补丁脚本；
+# 2026-10-26 起走路线 C：同一个 Flutter，换成自编并打了补丁的 flutter_windows.dll，见 build-engine.ps1）。
 
 $ErrorActionPreference = 'Stop'
 
@@ -11,6 +12,12 @@ $LeapgatePins = @{
     Flutter       = '3.44.9'
     # 来自官方发布清单 releases_windows.json
     FlutterSha256 = '8ef1107d226654736755bc51b969d6bd46787ff0241650f942e774fb0ca7d0ac'
+    # 3.44.9 的 bin\internal\engine.version；build-engine.ps1 自编引擎时核对，并作为 dll 里记的引擎版本
+    FlutterEngine = '5a2a6a42cce67f965cf540fcecf616faca624aa1'
+    # 3.44.9 标签指向的提交；build-engine.ps1 核对引擎检出的 HEAD
+    FlutterCommit = '6b182d2c7585eba26d4edce0f97630effd256c33'
+    # build-engine.ps1 第一次克隆 depot_tools 后检出这个提交（2026-10-26 编引擎时用的那版），之后不自更新
+    DepotTools    = 'faceefec3fab70643e950caad40fded806877988'
     # 和上游 CI 的 LLVM_VERSION 一致：hwcodec、magnum-opus 用的 bindgen 0.59 配 libclang 16+ 有已知问题
     Llvm          = '15.0.6'
     # 上游不发安装包的校验和，这是 2026-10-22 第一次从 GitHub release 下载时记下的
@@ -88,6 +95,37 @@ function Set-LeapgateBuildEnv {
     }
 
     @{ GitBash = Join-Path $gitRoot 'bin\bash.exe' }
+}
+
+# engine-patches\ 下的补丁，按文件名排序，带 SHA256。build-engine.ps1 写进产物戳和清单，
+# Assert-LeapgateEngine 拿它和清单比。.gitattributes 让 *.patch 不做换行转换，SHA256 在各处检出里一致
+function Get-LeapgateEnginePatches {
+    @(Get-ChildItem (Join-Path $PSScriptRoot 'engine-patches\*.patch') | Sort-Object Name | ForEach-Object {
+        [ordered]@{ name = $_.Name; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+    })
+}
+
+# SDK 缓存里的引擎是不是 build-engine.ps1 -Install 用当前补丁、钉住的引擎提交装的自编版：
+# 清单的引擎提交、补丁列表要和现在的一致，缓存里每个文件的 SHA256 要和清单一致。
+# 是就返回 flutter_windows.dll 的 SHA256，不是就抛错说明原因
+function Assert-LeapgateEngine {
+    param([hashtable]$Layout)
+    $dir = Join-Path $Layout.Flutter 'bin\cache\artifacts\engine\windows-x64-release'
+    $manifestPath = Join-Path $dir 'leapgate-engine.json'
+    if (-not (Test-Path $manifestPath)) { throw "没有清单 $manifestPath" }
+    $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
+    if ($m.engine_commit -ne $LeapgatePins.FlutterEngine) {
+        throw "清单里的引擎提交 $($m.engine_commit) 不是 env.ps1 钉住的 $($LeapgatePins.FlutterEngine)"
+    }
+    $format = { param($List) ($List | ForEach-Object { "$($_.name) $($_.sha256)" }) -join "`n" }
+    if ((& $format $m.patches) -ne (& $format @(Get-LeapgateEnginePatches))) {
+        throw "清单里的补丁和 engine-patches\ 不一致（补丁改过之后没有重跑 build-engine.ps1 -Install）"
+    }
+    foreach ($f in $m.files) {
+        $hash = (Get-FileHash (Join-Path $dir $f.name) -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($hash -ne $f.sha256) { throw "$($f.name) 的哈希 $hash 和清单 $manifestPath 不符" }
+    }
+    ($m.files | Where-Object name -eq 'flutter_windows.dll').sha256
 }
 
 # 跑一个外部命令，输出同时写日志；退出码非 0 就抛错。

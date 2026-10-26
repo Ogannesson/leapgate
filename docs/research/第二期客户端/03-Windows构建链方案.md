@@ -145,6 +145,8 @@
 
 ### 2.4 退路 C：自编 3.44.9 引擎，只打多窗口那一处补丁
 
+> 2026-10-26 更新：C 已经启用，起因不是多窗口，而是控制端在 Flutter 引擎无障碍桥里的 use-after-free（语义树更新中途失败后，委托还指着已释放的节点，无障碍客户端一查询就崩，上游没修，升级 Flutter 解决不了）。现在打两份补丁：`scripts/windows/engine-patches/0001`（无障碍桥在更新失败后重建、委托按 id 现取）和 `0002`（下面说的 `ClearCurrent` → `MakeCurrent`）。构建链没有照搬 rustdesk/engine 的脚本，而是用 `scripts/windows/build-engine.ps1` 在单一仓库里按 gclient 重新检出、只编 `flutter_windows.dll` 并覆盖 SDK 缓存；`build-client.ps1` 核对缓存里是不是用当前补丁编的自编版。下面两条是当时的估计，留作对照。
+
 - rustdesk/engine 的第 1 处改动就是一次字符串替换，3.44.9 里同一段代码还在，可以照搬；3~5 的 Win7 补丁一概不要。
 - 代价：要搭 Flutter 引擎的构建环境（depot_tools、gclient），源码几十 GB，在一台普通机器上编一次要以小时计；而且 3.27 以后引擎已经并进 `flutter/flutter` 单一仓库，rustdesk/engine 那份按旧结构写的脚本不能直接用【推测】。只有 B 的第 1 关不过时才值得做。
 

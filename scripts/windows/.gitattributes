@@ -1,2 +1,4 @@
 # pub 写出的锁文件是 LF；检出成 CRLF 的话，build-client.ps1 的漂移检查每次都会误报
 pubspec.lock.* text eol=lf
+# 引擎补丁按字节记 SHA256（build-engine.ps1 写进清单，build-client.ps1 核对），不做换行转换
+*.patch -text

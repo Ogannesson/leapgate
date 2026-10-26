@@ -10,6 +10,7 @@
     patch   跑上游的 Flutter 3.44 源码补丁脚本（已打过会跳过），再用本目录钉住的 pubspec.lock 覆盖
     bridge  生成 flutter_rust_bridge 桥接代码（缺文件或 flutter_ffi.rs 更新过才生成，-ForceBridge 强制）
     build   python build.py --portable --flutter --skip-portable-pack --hwcodec [--vram]
+            之前核对 SDK 缓存里的引擎是 build-engine.ps1 -Install 用当前补丁装的自编版，不是就停下
   patch、bridge、build 会改动 -Source 里被跟踪的文件（common.dart、pubspec.yaml、pubspec.lock），
   所以 -Source 应该是专门用来构建的 worktree，改动不要提交。
 
@@ -22,7 +23,9 @@ param(
     [ValidateSet('vcpkg', 'patch', 'bridge', 'build')][string[]]$Steps = @('vcpkg', 'patch', 'bridge', 'build'),
     [switch]$ForceBridge,
     # 关掉 D3D11 纹理零拷贝上屏（vram 特性），退回软件上屏
-    [switch]$NoVram
+    [switch]$NoVram,
+    # 允许用 SDK 缓存里的官方 flutter_windows.dll 编（只报警告）；默认要求 build-engine.ps1 -Install 装的自编引擎
+    [switch]$AllowOfficialEngine
 )
 
 . "$PSScriptRoot\env.ps1"
@@ -79,6 +82,18 @@ try {
     # ---- build ----
     if ('build' -in $Steps) {
         $log = Join-Path $L.Logs "$stamp-build.log"
+        # 路线 C：SDK 缓存里应是 build-engine.ps1 用当前 engine-patches\ 编、装进去的自编 flutter_windows.dll
+        # （带无障碍桥和多窗口的补丁）。flutter precache 或重装 SDK 会悄悄换回官方版，补丁改了也要重编，
+        # 所以每次按它写的清单核对
+        try {
+            $engineHash = Assert-LeapgateEngine $L
+        } catch {
+            if (-not $AllowOfficialEngine) {
+                throw "SDK 缓存里的引擎不是用当前补丁编的自编版（$_）：先跑 build-engine.ps1 -Install；确实要用官方引擎就加 -AllowOfficialEngine"
+            }
+            Write-Warning "用的不是当前补丁编的自编引擎（$_）：产物里的 flutter_windows.dll 可能没有无障碍桥（flutter#193588）和多窗口（flutter#155685）的补丁"
+            $engineHash = $null
+        }
         $buildArgs = @('build.py', '--portable', '--flutter', '--skip-portable-pack', '--hwcodec')
         if (-not $NoVram) { $buildArgs += '--vram' }
         # panic、日志里的 file!() 路径会编进二进制，把本机目录（含用户名）换成中性前缀。
@@ -101,6 +116,10 @@ try {
         # crate 仍叫 librustdesk，Flutter 的 CMake 拷贝时改名为 libleapgate.dll
         foreach ($f in 'leapgate.exe', 'libleapgate.dll', 'flutter_windows.dll', 'data\app.so') {
             if (-not (Test-Path (Join-Path $out $f))) { throw "产物缺少 $f：$out" }
+        }
+        if ($engineHash -and
+            (Get-FileHash (Join-Path $out 'flutter_windows.dll') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $engineHash) {
+            throw "产物里的 flutter_windows.dll 不是缓存里的自编引擎：$out"
         }
         # pubspec.yaml 随上游合并会变；pub get 改写了锁文件就说明钉住的那份要更新
         if ((Get-FileHash flutter\pubspec.lock).Hash -ne (Get-FileHash $pinnedLock).Hash) {

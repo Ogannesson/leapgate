@@ -1,0 +1,18 @@
+diff --git a/engine/src/flutter/shell/platform/windows/flutter_windows_engine.cc b/engine/src/flutter/shell/platform/windows/flutter_windows_engine.cc
+index 9970630a..62dffd8e 100644
+--- a/engine/src/flutter/shell/platform/windows/flutter_windows_engine.cc
++++ b/engine/src/flutter/shell/platform/windows/flutter_windows_engine.cc
+@@ -70,7 +70,12 @@ FlutterRendererConfig GetOpenGLRendererConfig() {
+     if (!host->egl_manager()) {
+       return false;
+     }
+-    return host->egl_manager()->render_context()->ClearCurrent();
++    // Workaround for https://github.com/flutter/flutter/issues/155685: with
++    // several engines in one process (one per window), clearing the current
++    // context here crashes ANGLE in StateManager11::onMakeCurrent when a
++    // window's engine shuts down. Keep the render context current instead, as
++    // RustDesk's engine build does. Not an upstream fix.
++    return host->egl_manager()->render_context()->MakeCurrent();
+   };
+   config.open_gl.present = [](void* user_data) -> bool { FML_UNREACHABLE(); };
+   config.open_gl.fbo_reset_after_present = true;

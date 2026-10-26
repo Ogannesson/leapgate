@@ -1,0 +1,1212 @@
+diff --git a/engine/src/flutter/shell/platform/common/accessibility_bridge.cc b/engine/src/flutter/shell/platform/common/accessibility_bridge.cc
+index d2524d35..0375cd5d 100644
+--- a/engine/src/flutter/shell/platform/common/accessibility_bridge.cc
++++ b/engine/src/flutter/shell/platform/common/accessibility_bridge.cc
+@@ -48,6 +48,23 @@ void AccessibilityBridge::AddFlutterSemanticsCustomActionUpdate(
+ }
+ 
+ void AccessibilityBridge::CommitUpdates() {
++  // After a failed update the tree was discarded (see ResetAfterFailedUpdate).
++  // Updates sent before the framework got the request for a complete tree are
++  // changes to the discarded tree and cannot be applied to an empty one; drop
++  // them until the complete tree, which contains the root, arrives.
++  if (awaiting_full_tree_ &&
++      pending_semantics_node_updates_.find(expected_root_id_) ==
++          pending_semantics_node_updates_.end()) {
++    bool dropped_nodes = !pending_semantics_node_updates_.empty();
++    pending_semantics_node_updates_.clear();
++    pending_semantics_custom_action_updates_.clear();
++    if (dropped_nodes) {
++      // Asks again if the earlier request was too recent or got lost.
++      MaybeRequestFullSemanticsTree();
++    }
++    return;
++  }
++
+   // AXTree cannot move a node in a single update.
+   // This must be split across two updates:
+   //
+@@ -55,17 +72,22 @@ void AccessibilityBridge::CommitUpdates() {
+   // * Update 2: re-add nodes (including their children) to their new parents.
+   //
+   // First, start by removing nodes if necessary.
++  //
++  // Both steps check the result of Unserialize. A failed Unserialize can stop
++  // half way, after it has freed nodes but before it notifies observers, and
++  // its error() stays set for the life of the tree. See
++  // ResetAfterFailedUpdate for how the bridge recovers.
++  std::string error;
+   std::optional<ui::AXTreeUpdate> remove_reparented =
+-      CreateRemoveReparentedNodesUpdate();
+-  if (remove_reparented.has_value()) {
+-    tree_->Unserialize(remove_reparented.value());
+-
+-    std::string error = tree_->error();
+-    if (!error.empty()) {
+-      FML_LOG(ERROR) << "Failed to update ui::AXTree, error: " << error;
+-      assert(false);
+-      return;
+-    }
++      CreateRemoveReparentedNodesUpdate(error);
++  if (!error.empty()) {
++    ResetAfterFailedUpdate(error);
++    return;
++  }
++  if (remove_reparented.has_value() &&
++      !tree_->Unserialize(remove_reparented.value())) {
++    ResetAfterFailedUpdate(tree_->error());
++    return;
+   }
+ 
+   // Second, apply the pending node updates. This also moves reparented nodes to
+@@ -105,15 +127,16 @@ void AccessibilityBridge::CommitUpdates() {
+     update.root_id = results.back().front().id;
+   }
+ 
+-  tree_->Unserialize(update);
++  bool applied = tree_->Unserialize(update);
+   pending_semantics_node_updates_.clear();
+   pending_semantics_custom_action_updates_.clear();
+ 
+-  std::string error = tree_->error();
+-  if (!error.empty()) {
+-    FML_LOG(ERROR) << "Failed to update ui::AXTree, error: " << error;
++  if (!applied) {
++    ResetAfterFailedUpdate(tree_->error());
+     return;
+   }
++  awaiting_full_tree_ = false;
++
+   // Handles accessibility events as the result of the semantics update.
+   for (const auto& targeted_event : event_generator_) {
+     auto event_target =
+@@ -127,6 +150,74 @@ void AccessibilityBridge::CommitUpdates() {
+   event_generator_.ClearEvents();
+ }
+ 
++void AccessibilityBridge::ResetAfterFailedUpdate(const std::string& error) {
++  FML_LOG(ERROR) << "Accessibility bridge rebuilt after failed update: "
++                 << error;
++
++  // The complete tree is recognized by its root. If the tree was already
++  // discarded and is still awaited, keep waiting for the same root.
++  AccessibilityNodeId root_id = expected_root_id_;
++  if (!awaiting_full_tree_) {
++    ui::AXNode* root = GetRootAsAXNode();
++    root_id = root ? root->id() : ui::AXNode::kInvalidAXID;
++  }
++
++  pending_semantics_node_updates_.clear();
++  pending_semantics_custom_action_updates_.clear();
++  // Queued events can point at nodes that the failed update freed.
++  event_generator_.ClearEvents();
++
++  // Repairing the half-applied tree in place would mean working out which
++  // nodes Unserialize freed and which it created without notifying anyone.
++  // Starting over is simpler and leaves nothing stale: destroy every delegate
++  // (on Windows this disconnects its AXPlatformNodeWin, so COM references that
++  // assistive technology still holds return E_FAIL instead of reaching freed
++  // nodes) and replace the tree, whose error() would otherwise stay set. The
++  // tree ID is kept because AXTreeManagerMap maps it to this bridge.
++  id_wrapper_map_.clear();
++  last_focused_id_ = ui::AXNode::kInvalidAXID;
++
++  ui::AXTreeID tree_id = tree_->GetAXTreeID();
++  event_generator_.ReleaseTree();
++  tree_->RemoveObserver(static_cast<ui::AXTreeObserver*>(this));
++  tree_ = std::make_unique<ui::AXTree>();
++  event_generator_.SetTree(tree_.get());
++  tree_->AddObserver(static_cast<ui::AXTreeObserver*>(this));
++  ui::AXTreeData data = tree_->data();
++  data.tree_id = tree_id;
++  tree_->UpdateData(data);
++
++  // Without a known root there is nothing to wait for; the next update is
++  // applied as the first one would be.
++  expected_root_id_ = root_id;
++  awaiting_full_tree_ = expected_root_id_ != ui::AXNode::kInvalidAXID;
++  // A framework that keeps sending updates that fail would otherwise make the
++  // bridge rebuild the complete tree on every frame, so the request is rate
++  // limited. Updates dropped while waiting ask again once it is allowed.
++  MaybeRequestFullSemanticsTree();
++}
++
++void AccessibilityBridge::MaybeRequestFullSemanticsTree() {
++  fml::TimePoint now = fml::TimePoint::Now();
++  if (last_full_tree_request_.has_value() &&
++      now - last_full_tree_request_.value() < full_tree_request_interval_) {
++    return;
++  }
++  last_full_tree_request_ = now;
++  if (!RequestFullSemanticsTree()) {
++    awaiting_full_tree_ = false;
++  }
++}
++
++bool AccessibilityBridge::RequestFullSemanticsTree() {
++  return false;
++}
++
++void AccessibilityBridge::SetFullTreeRequestIntervalForTesting(
++    fml::TimeDelta interval) {
++  full_tree_request_interval_ = interval;
++}
++
+ std::weak_ptr<FlutterPlatformNodeDelegate>
+ AccessibilityBridge::GetFlutterPlatformNodeDelegateFromID(
+     AccessibilityNodeId id) const {
+@@ -211,9 +302,14 @@ void AccessibilityBridge::OnAtomicUpdateFinished(
+ }
+ 
+ std::optional<ui::AXTreeUpdate>
+-AccessibilityBridge::CreateRemoveReparentedNodesUpdate() {
++AccessibilityBridge::CreateRemoveReparentedNodesUpdate(std::string& error) {
+   std::unordered_map<int32_t, ui::AXNodeData> updates;
+ 
++  // The framework has sent updates that break the rules below (for example
++  // https://github.com/flutter/flutter/issues/193588). They used to be
++  // asserts, which release builds compile out and which then left the second
++  // update to fail after it had freed nodes. Report them as an error instead;
++  // CommitUpdates then rebuilds the tree without applying anything.
+   for (const auto& node_update : pending_semantics_node_updates_) {
+     for (int32_t child_id : node_update.second.children_in_traversal_order) {
+       // Skip nodes that don't exist or have a parent in the current tree.
+@@ -223,7 +319,12 @@ AccessibilityBridge::CreateRemoveReparentedNodesUpdate() {
+       }
+ 
+       // Flutter's root node should never be reparented.
+-      assert(child->parent());
++      if (!child->parent()) {
++        error = "Root node " + std::to_string(child_id) +
++                " cannot become a child of " +
++                std::to_string(node_update.second.id);
++        return std::nullopt;
++      }
+ 
+       // Skip nodes whose parents are unchanged.
+       if (child->parent()->id() == node_update.second.id) {
+@@ -232,8 +333,14 @@ AccessibilityBridge::CreateRemoveReparentedNodesUpdate() {
+ 
+       // This pending update moves the current child node.
+       // That new child must have a corresponding pending update.
+-      assert(pending_semantics_node_updates_.find(child_id) !=
+-             pending_semantics_node_updates_.end());
++      if (pending_semantics_node_updates_.find(child_id) ==
++          pending_semantics_node_updates_.end()) {
++        error = "Node " + std::to_string(child_id) + " moved from " +
++                std::to_string(child->parent()->id()) + " to " +
++                std::to_string(node_update.second.id) +
++                " without an update for it";
++        return std::nullopt;
++      }
+ 
+       // Create an update to remove the child from its previous parent.
+       int32_t parent_id = child->parent()->id();
+@@ -245,7 +352,12 @@ AccessibilityBridge::CreateRemoveReparentedNodesUpdate() {
+       auto iter = std::find(parent->child_ids.begin(), parent->child_ids.end(),
+                             child_id);
+ 
+-      assert(iter != parent->child_ids.end());
++      // Already removed: two pending updates claim the same child.
++      if (iter == parent->child_ids.end()) {
++        error = "Node " + std::to_string(child_id) +
++                " is claimed by more than one parent";
++        return std::nullopt;
++      }
+       parent->child_ids.erase(iter);
+     }
+   }
+diff --git a/engine/src/flutter/shell/platform/common/accessibility_bridge.h b/engine/src/flutter/shell/platform/common/accessibility_bridge.h
+index 334eb26a..fd79abc8 100644
+--- a/engine/src/flutter/shell/platform/common/accessibility_bridge.h
++++ b/engine/src/flutter/shell/platform/common/accessibility_bridge.h
+@@ -5,9 +5,13 @@
+ #ifndef FLUTTER_SHELL_PLATFORM_COMMON_ACCESSIBILITY_BRIDGE_H_
+ #define FLUTTER_SHELL_PLATFORM_COMMON_ACCESSIBILITY_BRIDGE_H_
+ 
++#include <optional>
++#include <string>
+ #include <unordered_map>
+ 
+ #include "flutter/fml/mapping.h"
++#include "flutter/fml/time/time_delta.h"
++#include "flutter/fml/time/time_point.h"
+ #include "flutter/shell/platform/embedder/embedder.h"
+ 
+ #include "flutter/third_party/accessibility/ax/ax_event_generator.h"
+@@ -75,6 +79,11 @@ class AccessibilityBridge
+   ///             state. For example if a node reparents from A to B, callers
+   ///             should only call this method when both removal from A and
+   ///             addition to B are in the pending updates.
++  ///
++  ///             If the updates cannot be applied, the bridge discards its
++  ///             whole tree and all delegates, calls RequestFullSemanticsTree,
++  ///             and then ignores updates until one that contains the previous
++  ///             root node arrives.
+   void CommitUpdates();
+ 
+   //------------------------------------------------------------------------------
+@@ -108,6 +117,7 @@ class AccessibilityBridge
+                               const ui::AXNode::AXID node_id) const override;
+ 
+   // |AXTreeManager|
++  // |FlutterPlatformNodeDelegate::OwnerBridge|
+   ui::AXNode* GetNodeFromTree(const ui::AXNode::AXID node_id) const override;
+ 
+   // |AXTreeManager|
+@@ -136,7 +146,25 @@ class AccessibilityBridge
+   // |AXPlatformTreeManager|
+   ui::AXPlatformNodeDelegate* RootDelegate() const override;
+ 
++  //------------------------------------------------------------------------------
++  /// @brief      Sets the shortest time between two calls to
++  ///             RequestFullSemanticsTree. Tests only.
++  void SetFullTreeRequestIntervalForTesting(fml::TimeDelta interval);
++
+  protected:
++  //---------------------------------------------------------------------------
++  /// @brief      Asks the framework to send its complete semantics tree again.
++  ///             The bridge calls this after it discarded its tree because
++  ///             an update could not be applied. It is called at most once
++  ///             per second, and may be called again if the tree has not
++  ///             arrived by then.
++  ///
++  /// @return     Whether the tree was requested. The default implementation
++  ///             cannot request it and returns false; the bridge then applies
++  ///             the next updates as they come, as it does for the first
++  ///             update it receives.
++  virtual bool RequestFullSemanticsTree();
++
+   //---------------------------------------------------------------------------
+   /// @brief      Handle accessibility events generated due to accessibility
+   ///             tree changes. These events are needed to be sent to native
+@@ -203,11 +231,30 @@ class AccessibilityBridge
+       pending_semantics_custom_action_updates_;
+   AccessibilityNodeId last_focused_id_ = ui::AXNode::kInvalidAXID;
+ 
++  // Set when the tree was discarded after a failed update (see
++  // ResetAfterFailedUpdate) and a complete tree has been requested. Until an
++  // update containing |expected_root_id_| is applied, updates are dropped:
++  // they describe changes to the discarded tree.
++  bool awaiting_full_tree_ = false;
++  AccessibilityNodeId expected_root_id_ = ui::AXNode::kInvalidAXID;
++  std::optional<fml::TimePoint> last_full_tree_request_;
++  fml::TimeDelta full_tree_request_interval_ = fml::TimeDelta::FromSeconds(1);
++
+   void InitAXTree(const ui::AXTreeUpdate& initial_state);
+ 
+   // Create an update that removes any nodes that will be reparented by
+   // pending_semantics_updates_. Returns std::nullopt if none are reparented.
+-  std::optional<ui::AXTreeUpdate> CreateRemoveReparentedNodesUpdate();
++  // Sets |error| if the pending updates move a node in a way that can never
++  // be applied.
++  std::optional<ui::AXTreeUpdate> CreateRemoveReparentedNodesUpdate(
++      std::string& error);
++
++  // Brings the bridge back to a consistent state after an update could not be
++  // applied, and asks for the complete tree.
++  void ResetAfterFailedUpdate(const std::string& error);
++
++  // Calls RequestFullSemanticsTree unless it was called too recently.
++  void MaybeRequestFullSemanticsTree();
+ 
+   void GetSubTreeList(const SemanticsNode& target,
+                       std::vector<SemanticsNode>& result);
+diff --git a/engine/src/flutter/shell/platform/common/accessibility_bridge_unittests.cc b/engine/src/flutter/shell/platform/common/accessibility_bridge_unittests.cc
+index 4a1e1143..4c9e70af 100644
+--- a/engine/src/flutter/shell/platform/common/accessibility_bridge_unittests.cc
++++ b/engine/src/flutter/shell/platform/common/accessibility_bridge_unittests.cc
+@@ -7,6 +7,8 @@
+ #include "gmock/gmock.h"
+ #include "gtest/gtest.h"
+ 
++#include "flutter/fml/logging.h"
++#include "flutter/third_party/accessibility/ax/ax_action_data.h"
+ #include "flutter/third_party/accessibility/ax/ax_tree_manager_map.h"
+ #include "test_accessibility_bridge.h"
+ 
+@@ -635,5 +637,335 @@ TEST(AccessibilityBridgeTest, IsSelectedAttribute) {
+       ax::mojom::BoolAttribute::kSelected));
+ }
+ 
++namespace {
++
++// Builds the tree from https://github.com/flutter/flutter/issues/193588:
++//
++//          0
++//       /  |  \
++//      1   2   5
++//      |       |
++//      3       6
++//      |
++//      4
++void PopulateReparentingTree(TestAccessibilityBridge& bridge) {
++  std::vector<int32_t> node0_children{1, 2, 5};
++  std::vector<int32_t> node1_children{3};
++  std::vector<int32_t> node3_children{4};
++  std::vector<int32_t> node5_children{6};
++  bridge.AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(0, "node 0", &node0_children));
++  bridge.AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(1, "node 1", &node1_children));
++  bridge.AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(2, "node 2"));
++  bridge.AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(3, "node 3", &node3_children));
++  bridge.AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(4, "node 4"));
++  bridge.AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(5, "node 5", &node5_children));
++  bridge.AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(6, "node 6"));
++  bridge.CommitUpdates();
++}
++
++// Sends the complete tree 0 > [1, 2 > 3 > 4, 5], as the framework does after
++// the bridge asked for it.
++void SendCompleteTreeAfterReset(TestAccessibilityBridge& bridge) {
++  std::vector<int32_t> node0_children{1, 2, 5};
++  std::vector<int32_t> node2_children{3};
++  std::vector<int32_t> node3_children{4};
++  bridge.AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(0, "node 0", &node0_children));
++  bridge.AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(1, "node 1"));
++  bridge.AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(2, "node 2", &node2_children));
++  bridge.AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(3, "node 3", &node3_children));
++  bridge.AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(4, "node 4"));
++  bridge.AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(5, "node 5"));
++  bridge.CommitUpdates();
++}
++
++// A delegate whose node is gone answers as an empty node.
++void ExpectDetached(const std::shared_ptr<FlutterPlatformNodeDelegate>& node) {
++  EXPECT_EQ(node->GetAXNode(), nullptr);
++  EXPECT_EQ(node->GetParent(), nullptr);
++  EXPECT_EQ(node->GetChildCount(), 0);
++  EXPECT_EQ(node->ChildAtIndex(0), nullptr);
++  EXPECT_EQ(node->GetData().id, ui::AXNode::kInvalidAXID);
++  EXPECT_EQ(node->GetLowestPlatformAncestor(), nullptr);
++  ui::AXOffscreenResult offscreen = ui::AXOffscreenResult::kOnscreen;
++  EXPECT_TRUE(node->GetBoundsRect(ui::AXCoordinateSystem::kScreenDIPs,
++                                  ui::AXClippingBehavior::kUnclipped,
++                                  &offscreen)
++                  .IsEmpty());
++  EXPECT_EQ(offscreen, ui::AXOffscreenResult::kOffscreen);
++  ui::AXActionData action;
++  action.action = ax::mojom::Action::kDoDefault;
++  EXPECT_FALSE(node->AccessibilityPerformAction(action));
++}
++
++}  // namespace
++
++// https://github.com/flutter/flutter/issues/193588: one commit in which node 1
++// drops node 3, node 2 claims it and node 5 drops node 6, without sending
++// nodes 3 and 4. Applying it used to leave delegates that pointed at freed
++// nodes and a tree that refused every later update.
++TEST(AccessibilityBridgeTest, RecoversFromUpdateThatMovesUnsentNode) {
++  fml::testing::LogCapture log_capture;
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  bridge->SetFullTreeRequestIntervalForTesting(fml::TimeDelta::FromSeconds(60));
++  PopulateReparentingTree(*bridge);
++  ui::AXTreeID tree_id = bridge->GetTreeID();
++  auto stale_node3 = bridge->GetFlutterPlatformNodeDelegateFromID(3).lock();
++  auto stale_node6 = bridge->GetFlutterPlatformNodeDelegateFromID(6).lock();
++  ASSERT_TRUE(stale_node3);
++  ASSERT_TRUE(stale_node6);
++
++  std::vector<int32_t> node2_children{3};
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(1, "node 1"));
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(2, "node 2", &node2_children));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(5, "node 5"));
++  bridge->CommitUpdates();
++
++  EXPECT_NE(log_capture.str().find("bridge rebuilt after failed update"),
++            std::string::npos);
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++  // The bridge dropped every delegate and holds an empty tree.
++  for (int32_t id = 0; id <= 6; id++) {
++    EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(id).expired())
++        << "node " << id;
++  }
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), ui::AXNode::kInvalidAXID);
++  EXPECT_EQ(bridge->RootDelegate(), nullptr);
++  EXPECT_EQ(bridge->GetTreeID(), tree_id);
++  EXPECT_EQ(ui::AXTreeManagerMap::GetInstance().GetManager(tree_id),
++            static_cast<ui::AXTreeManager*>(bridge.get()));
++  // Delegates that outlived the tree are safe to query.
++  ExpectDetached(stale_node3);
++  ExpectDetached(stale_node6);
++
++  // An update against the discarded tree is dropped, and the complete tree is
++  // not asked for again this soon.
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(5, "node 5 new"));
++  bridge->CommitUpdates();
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(5).expired());
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++  // A commit without nodes does not end the wait.
++  bridge->CommitUpdates();
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(6, "node 6"));
++  bridge->CommitUpdates();
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(6).expired());
++
++  // The complete tree is applied.
++  bridge->accessibility_events.clear();
++  SendCompleteTreeAfterReset(*bridge);
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), 0);
++  auto node2 = bridge->GetFlutterPlatformNodeDelegateFromID(2).lock();
++  auto node3 = bridge->GetFlutterPlatformNodeDelegateFromID(3).lock();
++  ASSERT_TRUE(node2);
++  ASSERT_TRUE(node3);
++  EXPECT_EQ(node3->GetAXNode()->parent()->id(), 2);
++  EXPECT_EQ(node2->GetChildCount(), 1);
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(6).expired());
++  EXPECT_FALSE(bridge->accessibility_events.empty());
++
++  // Later updates apply as usual.
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(4, "node 4 new"));
++  bridge->CommitUpdates();
++  auto node4 = bridge->GetFlutterPlatformNodeDelegateFromID(4).lock();
++  ASSERT_TRUE(node4);
++  EXPECT_EQ(node4->GetName(), "node 4 new");
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++}
++
++// The second Unserialize in CommitUpdates frees node 6 and then fails, because
++// node 2 claims node 7, which is not sent.
++TEST(AccessibilityBridgeTest, RecoversWhenUpdateFailsAfterFreeingNodes) {
++  fml::testing::LogCapture log_capture;
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  PopulateReparentingTree(*bridge);
++  auto stale_node5 = bridge->GetFlutterPlatformNodeDelegateFromID(5).lock();
++  auto stale_node6 = bridge->GetFlutterPlatformNodeDelegateFromID(6).lock();
++  ASSERT_TRUE(stale_node5);
++  ASSERT_TRUE(stale_node6);
++
++  std::vector<int32_t> node2_children{7};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(2, "node 2", &node2_children));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(5, "node 5"));
++  bridge->CommitUpdates();
++
++  EXPECT_NE(log_capture.str().find("bridge rebuilt after failed update: "
++                                   "Nodes left pending by the update: 7"),
++            std::string::npos);
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(6).expired());
++  ExpectDetached(stale_node5);
++  ExpectDetached(stale_node6);
++
++  SendCompleteTreeAfterReset(*bridge);
++  auto node5 = bridge->GetFlutterPlatformNodeDelegateFromID(5).lock();
++  ASSERT_TRUE(node5);
++  EXPECT_EQ(node5->GetChildCount(), 0);
++  EXPECT_EQ(node5->GetAXNode()->parent()->id(), 0);
++}
++
++TEST(AccessibilityBridgeTest, LimitsFullTreeRequests) {
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  bridge->SetFullTreeRequestIntervalForTesting(fml::TimeDelta::FromSeconds(60));
++  PopulateReparentingTree(*bridge);
++
++  std::vector<int32_t> node2_children{7};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(2, "node 2", &node2_children));
++  bridge->CommitUpdates();
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++
++  // A failing update that contains the root fails again; within the interval
++  // the bridge rebuilds but does not ask again.
++  std::vector<int32_t> node0_children{8};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(0, "node 0", &node0_children));
++  bridge->CommitUpdates();
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), ui::AXNode::kInvalidAXID);
++
++  // Once the interval has passed, an update that has to be dropped asks again.
++  bridge->SetFullTreeRequestIntervalForTesting(fml::TimeDelta::Zero());
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(5, "node 5"));
++  bridge->CommitUpdates();
++  EXPECT_EQ(bridge->full_tree_requests, 2);
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(5).expired());
++}
++
++// Node 1 claims the root. This used to dereference the root's null parent.
++TEST(AccessibilityBridgeTest, RejectsUpdateThatReparentsRoot) {
++  fml::testing::LogCapture log_capture;
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  PopulateReparentingTree(*bridge);
++  auto stale_node1 = bridge->GetFlutterPlatformNodeDelegateFromID(1).lock();
++  ASSERT_TRUE(stale_node1);
++
++  std::vector<int32_t> node1_children{3, 0};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(1, "node 1", &node1_children));
++  bridge->CommitUpdates();
++
++  EXPECT_NE(log_capture.str().find("bridge rebuilt after failed update: "
++                                   "Root node 0 cannot become a child of 1"),
++            std::string::npos);
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++  for (int32_t id = 0; id <= 6; id++) {
++    EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(id).expired())
++        << "node " << id;
++  }
++  ExpectDetached(stale_node1);
++
++  SendCompleteTreeAfterReset(*bridge);
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), 0);
++  EXPECT_FALSE(bridge->GetFlutterPlatformNodeDelegateFromID(1).expired());
++}
++
++// Nodes 2 and 5 both claim node 3, whose parent is node 1. This used to erase
++// the end iterator of node 1's children.
++TEST(AccessibilityBridgeTest, RejectsUpdateWhereTwoParentsClaimOneChild) {
++  fml::testing::LogCapture log_capture;
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  PopulateReparentingTree(*bridge);
++  auto stale_node3 = bridge->GetFlutterPlatformNodeDelegateFromID(3).lock();
++  ASSERT_TRUE(stale_node3);
++
++  std::vector<int32_t> node2_children{3};
++  std::vector<int32_t> node3_children{4};
++  std::vector<int32_t> node5_children{6, 3};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(2, "node 2", &node2_children));
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(3, "node 3", &node3_children));
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(5, "node 5", &node5_children));
++  bridge->CommitUpdates();
++
++  EXPECT_NE(log_capture.str().find("bridge rebuilt after failed update: "
++                                   "Node 3 is claimed by more than one parent"),
++            std::string::npos);
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), ui::AXNode::kInvalidAXID);
++  ExpectDetached(stale_node3);
++
++  SendCompleteTreeAfterReset(*bridge);
++  auto node3 = bridge->GetFlutterPlatformNodeDelegateFromID(3).lock();
++  ASSERT_TRUE(node3);
++  EXPECT_EQ(node3->GetAXNode()->parent()->id(), 2);
++}
++
++// Node 3 moves from node 1 to node 2, and node 4 moves out of node 3 to node
++// 5. The update that removes the moved nodes lists node 1 without node 3,
++// which marks node 3 for destruction, and then node 3 without node 4, so the
++// first Unserialize in CommitUpdates fails. Which of the two AXTree sees first
++// depends on unordered_map order; checking the error text makes the test fail
++// loudly if that changes instead of silently testing the second Unserialize.
++TEST(AccessibilityBridgeTest, RecoversWhenRemovingMovedNodesFails) {
++  fml::testing::LogCapture log_capture;
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  PopulateReparentingTree(*bridge);
++  auto stale_node4 = bridge->GetFlutterPlatformNodeDelegateFromID(4).lock();
++  ASSERT_TRUE(stale_node4);
++
++  std::vector<int32_t> node2_children{3};
++  std::vector<int32_t> node5_children{6, 4};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(2, "node 2", &node2_children));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(3, "node 3"));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(4, "node 4"));
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(5, "node 5", &node5_children));
++  bridge->CommitUpdates();
++
++  EXPECT_NE(log_capture.str().find("bridge rebuilt after failed update: "
++                                   "3 will not be in the tree"),
++            std::string::npos)
++      << log_capture.str();
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++  for (int32_t id = 0; id <= 6; id++) {
++    EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(id).expired())
++        << "node " << id;
++  }
++  ExpectDetached(stale_node4);
++
++  SendCompleteTreeAfterReset(*bridge);
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), 0);
++}
++
++// If the complete tree cannot be requested, the bridge does not wait for it:
++// the next update is applied as the first update would be, which makes its
++// first node the root.
++TEST(AccessibilityBridgeTest, AppliesNextUpdateIfFullTreeCannotBeRequested) {
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  bridge->can_request_full_tree = false;
++  PopulateReparentingTree(*bridge);
++
++  std::vector<int32_t> node2_children{7};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(2, "node 2", &node2_children));
++  bridge->CommitUpdates();
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), ui::AXNode::kInvalidAXID);
++
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(5, "node 5"));
++  bridge->CommitUpdates();
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), 5);
++  EXPECT_FALSE(bridge->GetFlutterPlatformNodeDelegateFromID(5).expired());
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++}
++
+ }  // namespace testing
+ }  // namespace flutter
+diff --git a/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate.cc b/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate.cc
+index 9e4e8a4a..fb6b205f 100644
+--- a/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate.cc
++++ b/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate.cc
+@@ -9,6 +9,7 @@
+ #include "flutter/shell/platform/common/accessibility_bridge.h"
+ #include "flutter/third_party/accessibility/ax/ax_action_data.h"
+ #include "flutter/third_party/accessibility/ax/ax_tree_manager_map.h"
++#include "flutter/third_party/accessibility/base/no_destructor.h"
+ #include "flutter/third_party/accessibility/gfx/geometry/rect_conversions.h"
+ 
+ namespace flutter {
+@@ -20,16 +21,23 @@ FlutterPlatformNodeDelegate::~FlutterPlatformNodeDelegate() = default;
+ void FlutterPlatformNodeDelegate::Init(std::weak_ptr<OwnerBridge> bridge,
+                                        ui::AXNode* node) {
+   bridge_ = std::move(bridge);
+-  ax_node_ = node;
++  ax_node_id_ = node->id();
+ }
+ 
+ ui::AXNode* FlutterPlatformNodeDelegate::GetAXNode() const {
+-  return ax_node_;
++  auto bridge_ptr = bridge_.lock();
++  if (!bridge_ptr) {
++    return nullptr;
++  }
++  return bridge_ptr->GetNodeFromTree(ax_node_id_);
+ }
+ 
+ bool FlutterPlatformNodeDelegate::AccessibilityPerformAction(
+     const ui::AXActionData& data) {
+-  AccessibilityNodeId target = ax_node_->id();
++  if (!GetAXNode()) {
++    return false;
++  }
++  AccessibilityNodeId target = ax_node_id_;
+   auto bridge_ptr = bridge_.lock();
+   BASE_DCHECK(bridge_ptr);
+   switch (data.action) {
+@@ -58,16 +66,23 @@ bool FlutterPlatformNodeDelegate::AccessibilityPerformAction(
+ }
+ 
+ const ui::AXNodeData& FlutterPlatformNodeDelegate::GetData() const {
+-  return ax_node_->data();
++  if (ui::AXNode* node = GetAXNode()) {
++    return node->data();
++  }
++  // The node has left the tree while a platform node still refers to this
++  // delegate. Answer as an empty node.
++  static const base::NoDestructor<ui::AXNodeData> empty_data;
++  return *empty_data;
+ }
+ 
+ gfx::NativeViewAccessible FlutterPlatformNodeDelegate::GetParent() {
+-  if (!ax_node_->parent()) {
++  ui::AXNode* node = GetAXNode();
++  if (!node || !node->parent()) {
+     return nullptr;
+   }
+   auto bridge_ptr = bridge_.lock();
+   BASE_DCHECK(bridge_ptr);
+-  return bridge_ptr->GetNativeAccessibleFromId(ax_node_->parent()->id());
++  return bridge_ptr->GetNativeAccessibleFromId(node->parent()->id());
+ }
+ 
+ gfx::NativeViewAccessible FlutterPlatformNodeDelegate::GetFocus() {
+@@ -81,20 +96,38 @@ gfx::NativeViewAccessible FlutterPlatformNodeDelegate::GetFocus() {
+ }
+ 
+ int FlutterPlatformNodeDelegate::GetChildCount() const {
+-  return static_cast<int>(ax_node_->GetUnignoredChildCount());
++  ui::AXNode* node = GetAXNode();
++  if (!node) {
++    return 0;
++  }
++  return static_cast<int>(node->GetUnignoredChildCount());
+ }
+ 
+ gfx::NativeViewAccessible FlutterPlatformNodeDelegate::ChildAtIndex(int index) {
++  ui::AXNode* node = GetAXNode();
++  if (!node) {
++    return nullptr;
++  }
++  ui::AXNode* child = node->GetUnignoredChildAtIndex(index);
++  if (!child) {
++    return nullptr;
++  }
+   auto bridge_ptr = bridge_.lock();
+   BASE_DCHECK(bridge_ptr);
+-  AccessibilityNodeId child = ax_node_->GetUnignoredChildAtIndex(index)->id();
+-  return bridge_ptr->GetNativeAccessibleFromId(child);
++  return bridge_ptr->GetNativeAccessibleFromId(child->id());
+ }
+ 
+ gfx::Rect FlutterPlatformNodeDelegate::GetBoundsRect(
+     const ui::AXCoordinateSystem coordinate_system,
+     const ui::AXClippingBehavior clipping_behavior,
+     ui::AXOffscreenResult* offscreen_result) const {
++  ui::AXNode* node = GetAXNode();
++  if (!node) {
++    if (offscreen_result != nullptr) {
++      *offscreen_result = ui::AXOffscreenResult::kOffscreen;
++    }
++    return gfx::Rect();
++  }
+   auto bridge_ptr = bridge_.lock();
+   BASE_DCHECK(bridge_ptr);
+   // TODO(chunhtai): We need to apply screen dpr in here.
+@@ -103,7 +136,7 @@ gfx::Rect FlutterPlatformNodeDelegate::GetBoundsRect(
+       clipping_behavior == ui::AXClippingBehavior::kClipped;
+   bool offscreen = false;
+   gfx::RectF bounds =
+-      bridge_ptr->RelativeToGlobalBounds(ax_node_, offscreen, clip_bounds);
++      bridge_ptr->RelativeToGlobalBounds(node, offscreen, clip_bounds);
+   if (offscreen_result != nullptr) {
+     *offscreen_result = offscreen ? ui::AXOffscreenResult::kOffscreen
+                                   : ui::AXOffscreenResult::kOnscreen;
+@@ -122,26 +155,38 @@ ui::AXPlatformNode* FlutterPlatformNodeDelegate::GetPlatformNode() const {
+ 
+ gfx::NativeViewAccessible
+ FlutterPlatformNodeDelegate::GetLowestPlatformAncestor() const {
++  ui::AXNode* node = GetAXNode();
++  if (!node) {
++    return nullptr;
++  }
+   auto bridge_ptr = bridge_.lock();
+   BASE_DCHECK(bridge_ptr);
+-  auto lowest_platform_ancestor = ax_node_->GetLowestPlatformAncestor();
++  auto lowest_platform_ancestor = node->GetLowestPlatformAncestor();
+   if (lowest_platform_ancestor) {
+     return bridge_ptr->GetNativeAccessibleFromId(
+-        ax_node_->GetLowestPlatformAncestor()->id());
++        lowest_platform_ancestor->id());
+   }
+   return nullptr;
+ }
+ 
+ ui::AXNodePosition::AXPositionInstance
+ FlutterPlatformNodeDelegate::CreateTextPositionAt(int offset) const {
+-  return ui::AXNodePosition::CreatePosition(*ax_node_, offset);
++  ui::AXNode* node = GetAXNode();
++  if (!node) {
++    return ui::AXNodePosition::CreateNullPosition();
++  }
++  return ui::AXNodePosition::CreatePosition(*node, offset);
+ }
+ 
+ ui::AXPlatformNode* FlutterPlatformNodeDelegate::GetFromNodeID(
+     int32_t node_id) {
++  ui::AXNode* node = GetAXNode();
++  if (!node) {
++    return nullptr;
++  }
+   ui::AXTreeManager* tree_manager =
+       ui::AXTreeManagerMap::GetInstance().GetManager(
+-          ax_node_->tree()->GetAXTreeID());
++          node->tree()->GetAXTreeID());
+   AccessibilityBridge* platform_manager =
+       static_cast<AccessibilityBridge*>(tree_manager);
+   return platform_manager->GetPlatformNodeFromTree(node_id);
+@@ -159,7 +204,19 @@ ui::AXPlatformNode* FlutterPlatformNodeDelegate::GetFromTreeIDAndNodeID(
+ 
+ const ui::AXTree::Selection FlutterPlatformNodeDelegate::GetUnignoredSelection()
+     const {
+-  return ax_node_->GetUnignoredSelection();
++  ui::AXNode* node = GetAXNode();
++  if (!node) {
++    return ui::AXTree::Selection{
++        .is_backward = false,
++        .anchor_object_id = ui::AXNode::kInvalidAXID,
++        .anchor_offset = -1,
++        .anchor_affinity = ax::mojom::TextAffinity::kDownstream,
++        .focus_object_id = ui::AXNode::kInvalidAXID,
++        .focus_offset = -1,
++        .focus_affinity = ax::mojom::TextAffinity::kDownstream,
++    };
++  }
++  return node->GetUnignoredSelection();
+ }
+ 
+ }  // namespace flutter
+diff --git a/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate.h b/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate.h
+index 9c90d5a9..aad67dad 100644
+--- a/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate.h
++++ b/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate.h
+@@ -91,6 +91,13 @@ class FlutterPlatformNodeDelegate : public ui::AXPlatformNodeDelegateBase {
+     ///
+     /// @param[in]  node_id     The id of the focused node.
+     virtual void SetLastFocusedId(AccessibilityNodeId node_id) = 0;
++
++    //---------------------------------------------------------------------------
++    /// @brief      Get the node with the given id from the bridge's current
++    ///             tree, or nullptr if the tree does not contain it.
++    ///
++    /// @param[in]  node_id     The id of the node to look up.
++    virtual ui::AXNode* GetNodeFromTree(AccessibilityNodeId node_id) const = 0;
+   };
+ 
+   FlutterPlatformNodeDelegate();
+@@ -147,6 +154,9 @@ class FlutterPlatformNodeDelegate : public ui::AXPlatformNodeDelegateBase {
+ 
+   //------------------------------------------------------------------------------
+   /// @brief      Gets the underlying ax node for this platform node delegate.
++  ///             Returns nullptr once the node is no longer in the owner
++  ///             bridge's tree, or the bridge is gone; the other methods then
++  ///             answer as for an empty node.
+   ui::AXNode* GetAXNode() const;
+ 
+   //------------------------------------------------------------------------------
+@@ -172,7 +182,12 @@ class FlutterPlatformNodeDelegate : public ui::AXPlatformNodeDelegateBase {
+   virtual const ui::AXTree::Selection GetUnignoredSelection() const override;
+ 
+  private:
+-  ui::AXNode* ax_node_;
++  // The node is looked up by id on every use instead of keeping the
++  // ui::AXNode pointer. ui::AXTree frees nodes during Unserialize, and when an
++  // update fails part way through, the tree returns before telling its
++  // observers about the nodes it already freed, so the bridge cannot drop this
++  // delegate in time. See AccessibilityBridge::CommitUpdates.
++  AccessibilityNodeId ax_node_id_ = ui::AXNode::kInvalidAXID;
+   std::weak_ptr<OwnerBridge> bridge_;
+   ui::AXUniqueId unique_id_;
+ };
+diff --git a/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate_unittests.cc b/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate_unittests.cc
+index 146eca2a..30d5af89 100644
+--- a/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate_unittests.cc
++++ b/engine/src/flutter/shell/platform/common/flutter_platform_node_delegate_unittests.cc
+@@ -338,5 +338,83 @@ TEST(FlutterPlatformNodeDelegateTest, canGetFromNodeID) {
+   EXPECT_EQ(child1_node->GetPlatformNode(), node_by_id);
+ }
+ 
++// A platform node can keep its delegate alive after the node has left the
++// tree. The delegate must not reach the freed ui::AXNode.
++TEST(FlutterPlatformNodeDelegateTest, returnsNullWhenNodeIsNoLongerInTree) {
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  FlutterSemanticsFlags flags = FlutterSemanticsFlags{0};
++  FlutterSemanticsNode2 root{sizeof(FlutterSemanticsNode2), 0};
++  root.label = "root";
++  root.hint = "";
++  root.value = "";
++  root.increased_value = "";
++  root.decreased_value = "";
++  root.tooltip = "";
++  root.child_count = 1;
++  root.flags2 = &flags;
++  int32_t children[] = {1};
++  root.children_in_traversal_order = children;
++  root.custom_accessibility_actions_count = 0;
++  root.identifier = "";
++  root.rect = {0, 0, 100, 100};  // LTRB
++  root.transform = {1, 0, 0, 0, 1, 0, 0, 0, 1};
++  bridge->AddFlutterSemanticsNodeUpdate(root);
++
++  FlutterSemanticsNode2 child1{sizeof(FlutterSemanticsNode2), 1};
++  child1.label = "child 1";
++  child1.hint = "";
++  child1.value = "";
++  child1.increased_value = "";
++  child1.decreased_value = "";
++  child1.tooltip = "";
++  child1.child_count = 0;
++  child1.flags2 = &flags;
++  child1.custom_accessibility_actions_count = 0;
++  child1.identifier = "";
++  child1.rect = {0, 0, 50, 50};  // LTRB
++  child1.transform = {1, 0, 0, 0, 1, 0, 0, 0, 1};
++  bridge->AddFlutterSemanticsNodeUpdate(child1);
++  bridge->CommitUpdates();
++
++  auto child1_node = bridge->GetFlutterPlatformNodeDelegateFromID(1).lock();
++  ASSERT_TRUE(child1_node);
++  ASSERT_NE(child1_node->GetAXNode(), nullptr);
++
++  // Remove the child from the tree while holding on to its delegate.
++  root.child_count = 0;
++  root.children_in_traversal_order = nullptr;
++  bridge->AddFlutterSemanticsNodeUpdate(root);
++  bridge->CommitUpdates();
++  ASSERT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(1).expired());
++
++  EXPECT_EQ(child1_node->GetAXNode(), nullptr);
++  EXPECT_EQ(child1_node->GetData().id, ui::AXNode::kInvalidAXID);
++  EXPECT_EQ(child1_node->GetParent(), nullptr);
++  EXPECT_EQ(child1_node->GetChildCount(), 0);
++  EXPECT_EQ(child1_node->ChildAtIndex(0), nullptr);
++  EXPECT_EQ(child1_node->GetLowestPlatformAncestor(), nullptr);
++  EXPECT_EQ(child1_node->GetFromNodeID(0), nullptr);
++  ui::AXOffscreenResult offscreen = ui::AXOffscreenResult::kOnscreen;
++  EXPECT_TRUE(child1_node
++                  ->GetBoundsRect(ui::AXCoordinateSystem::kScreenDIPs,
++                                  ui::AXClippingBehavior::kUnclipped,
++                                  &offscreen)
++                  .IsEmpty());
++  EXPECT_EQ(offscreen, ui::AXOffscreenResult::kOffscreen);
++  ui::AXActionData action_data;
++  action_data.action = ax::mojom::Action::kDoDefault;
++  EXPECT_FALSE(child1_node->AccessibilityPerformAction(action_data));
++  EXPECT_TRUE(bridge->performed_actions.empty());
++  EXPECT_EQ(child1_node->GetUnignoredSelection().anchor_object_id,
++            ui::AXNode::kInvalidAXID);
++
++  // The same holds once the bridge itself is gone.
++  auto root_node = bridge->GetFlutterPlatformNodeDelegateFromID(0).lock();
++  bridge.reset();
++  EXPECT_EQ(root_node->GetAXNode(), nullptr);
++  EXPECT_EQ(root_node->GetChildCount(), 0);
++}
++
+ }  // namespace testing
+ }  // namespace flutter
+diff --git a/engine/src/flutter/shell/platform/common/test_accessibility_bridge.cc b/engine/src/flutter/shell/platform/common/test_accessibility_bridge.cc
+index aa1a9def..fe5472f1 100644
+--- a/engine/src/flutter/shell/platform/common/test_accessibility_bridge.cc
++++ b/engine/src/flutter/shell/platform/common/test_accessibility_bridge.cc
+@@ -23,4 +23,9 @@ void TestAccessibilityBridge::DispatchAccessibilityAction(
+   performed_actions.push_back(action);
+ }
+ 
++bool TestAccessibilityBridge::RequestFullSemanticsTree() {
++  full_tree_requests++;
++  return can_request_full_tree;
++}
++
+ }  // namespace flutter
+diff --git a/engine/src/flutter/shell/platform/common/test_accessibility_bridge.h b/engine/src/flutter/shell/platform/common/test_accessibility_bridge.h
+index a9ce4326..f73f4c5c 100644
+--- a/engine/src/flutter/shell/platform/common/test_accessibility_bridge.h
++++ b/engine/src/flutter/shell/platform/common/test_accessibility_bridge.h
+@@ -19,6 +19,8 @@ class TestAccessibilityBridge : public AccessibilityBridge {
+ 
+   std::vector<ui::AXEventGenerator::Event> accessibility_events;
+   std::vector<FlutterSemanticsAction> performed_actions;
++  int full_tree_requests = 0;
++  bool can_request_full_tree = true;
+ 
+  protected:
+   void OnAccessibilityEvent(
+@@ -26,6 +28,8 @@ class TestAccessibilityBridge : public AccessibilityBridge {
+ 
+   std::shared_ptr<FlutterPlatformNodeDelegate>
+   CreateFlutterPlatformNodeDelegate() override;
++
++  bool RequestFullSemanticsTree() override;
+ };
+ 
+ }  // namespace flutter
+diff --git a/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows.cc b/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows.cc
+index 08539706..13ff9f07 100644
+--- a/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows.cc
++++ b/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows.cc
+@@ -173,6 +173,10 @@ AccessibilityBridgeWindows::CreateFlutterPlatformNodeDelegate() {
+       shared_from_this(), view_);
+ }
+ 
++bool AccessibilityBridgeWindows::RequestFullSemanticsTree() {
++  return view_->GetEngine()->RequestFullSemanticsTree();
++}
++
+ void AccessibilityBridgeWindows::DispatchWinAccessibilityEvent(
+     std::shared_ptr<FlutterPlatformNodeDelegateWindows> node_delegate,
+     ax::mojom::Event event_type) {
+diff --git a/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows.h b/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows.h
+index efb2f8a4..305d8084 100644
+--- a/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows.h
++++ b/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows.h
+@@ -68,6 +68,9 @@ class AccessibilityBridgeWindows : public AccessibilityBridge,
+   std::shared_ptr<FlutterPlatformNodeDelegate>
+   CreateFlutterPlatformNodeDelegate() override;
+ 
++  // |AccessibilityBridge|
++  bool RequestFullSemanticsTree() override;
++
+   // Retrieve the focused node for accessibility events.
+   virtual std::weak_ptr<FlutterPlatformNodeDelegate> GetFocusedNode();
+ 
+diff --git a/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows_unittests.cc b/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows_unittests.cc
+index 64b196f0..db83bab7 100644
+--- a/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows_unittests.cc
++++ b/engine/src/flutter/shell/platform/windows/accessibility_bridge_windows_unittests.cc
+@@ -7,6 +7,7 @@
+ #include <comdef.h>
+ #include <comutil.h>
+ #include <oleacc.h>
++#include <wrl/client.h>
+ 
+ #include <vector>
+ 
+@@ -402,5 +403,79 @@ TEST(AccessibilityBridgeWindows, OnDocumentSelectionChanged) {
+       ax::mojom::Event::kDocumentSelectionChanged, 2);
+ }
+ 
++// An update that fails half way frees nodes without telling the bridge. The
++// bridge then drops every delegate, so an IAccessible that a client still
++// holds returns E_FAIL instead of reading freed memory, and the framework is
++// asked for the complete semantics tree.
++TEST(AccessibilityBridgeWindows, FailedUpdateDisconnectsNodesAndRequestsTree) {
++  // Declared before the engine so that it outlives it.
++  std::vector<bool> semantics_enabled_calls;
++  auto engine = GetTestEngine();
++  EngineModifier modifier{engine.get()};
++  modifier.embedder_api().UpdateSemanticsEnabled = MOCK_ENGINE_PROC(
++      UpdateSemanticsEnabled,
++      ([&semantics_enabled_calls](FLUTTER_API_SYMBOL(FlutterEngine) engine,
++                                  bool enabled) {
++        semantics_enabled_calls.push_back(enabled);
++        return kSuccess;
++      }));
++  FlutterWindowsViewSpy view{
++      engine.get(), std::make_unique<NiceMock<MockWindowBindingHandler>>()};
++  modifier.SetImplicitView(&view);
++  view.OnUpdateSemanticsEnabled(true);
++  semantics_enabled_calls.clear();
++
++  auto bridge = view.accessibility_bridge().lock();
++  PopulateAXTree(bridge);
++
++  // A client holds the IAccessible of node 4.
++  Microsoft::WRL::ComPtr<IAccessible> node4_accessible =
++      bridge->GetFlutterPlatformNodeDelegateFromID(4)
++          .lock()
++          ->GetNativeViewAccessible();
++  ASSERT_NE(node4_accessible.Get(), nullptr);
++
++  // Node 2 drops node 4, and node 1 claims node 7, which is not sent. The
++  // update frees node 4 and then fails.
++  auto empty_flags = FlutterSemanticsFlags{};
++  FlutterSemanticsNode2 node1{sizeof(FlutterSemanticsNode2), 1};
++  std::vector<int32_t> node1_children{7};
++  node1.child_count = node1_children.size();
++  node1.children_in_traversal_order = node1_children.data();
++  node1.children_in_hit_test_order = node1_children.data();
++  node1.flags2 = &empty_flags;
++  FlutterSemanticsNode2 node2{sizeof(FlutterSemanticsNode2), 2};
++  std::vector<int32_t> node2_children{3};
++  node2.child_count = node2_children.size();
++  node2.children_in_traversal_order = node2_children.data();
++  node2.children_in_hit_test_order = node2_children.data();
++  node2.flags2 = &empty_flags;
++  bridge->AddFlutterSemanticsNodeUpdate(node1);
++  bridge->AddFlutterSemanticsNodeUpdate(node2);
++  bridge->CommitUpdates();
++
++  for (int32_t id = 0; id <= 4; id++) {
++    EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(id).expired());
++  }
++  IDispatch* parent = nullptr;
++  EXPECT_EQ(node4_accessible->get_accParent(&parent), E_FAIL);
++  EXPECT_EQ(parent, nullptr);
++  VARIANT self{};
++  self.vt = VT_I4;
++  self.lVal = CHILDID_SELF;
++  VARIANT state{};
++  EXPECT_EQ(node4_accessible->get_accState(self, &state), E_FAIL);
++  EXPECT_EQ(bridge->GetChildOfAXFragmentRoot(), nullptr);
++
++  // The complete tree is requested by turning semantics off and on in the
++  // framework, after the update callback has returned. The view keeps its
++  // bridge.
++  EXPECT_TRUE(semantics_enabled_calls.empty());
++  engine->task_runner()->ProcessTasks();
++  EXPECT_EQ(semantics_enabled_calls, (std::vector<bool>{false, true}));
++  EXPECT_EQ(view.accessibility_bridge().lock(), bridge);
++  EXPECT_TRUE(engine->semantics_enabled());
++}
++
+ }  // namespace testing
+ }  // namespace flutter
+diff --git a/engine/src/flutter/shell/platform/windows/flutter_platform_node_delegate_windows.cc b/engine/src/flutter/shell/platform/windows/flutter_platform_node_delegate_windows.cc
+index a548d70c..4c3129ba 100644
+--- a/engine/src/flutter/shell/platform/windows/flutter_platform_node_delegate_windows.cc
++++ b/engine/src/flutter/shell/platform/windows/flutter_platform_node_delegate_windows.cc
+@@ -62,15 +62,23 @@ gfx::NativeViewAccessible FlutterPlatformNodeDelegateWindows::HitTestSync(
+     return nullptr;
+   }
+ 
++  // The node may have left the tree while a client still holds its
++  // IAccessible.
++  ui::AXNode* node = GetAXNode();
++  if (!node) {
++    return nullptr;
++  }
++
+   // If any child in this node's subtree contains the point, return that child.
+   auto bridge = bridge_.lock();
+   FML_DCHECK(bridge);
+-  for (const ui::AXNode* child : GetAXNode()->children()) {
++  for (const ui::AXNode* child : node->children()) {
+     std::shared_ptr<FlutterPlatformNodeDelegateWindows> win_delegate =
+         std::static_pointer_cast<FlutterPlatformNodeDelegateWindows>(
+             bridge->GetFlutterPlatformNodeDelegateFromID(child->id()).lock());
+-    FML_DCHECK(win_delegate)
+-        << "No FlutterPlatformNodeDelegate found for node " << child->id();
++    if (!win_delegate) {
++      continue;
++    }
+     auto hit_view = win_delegate->HitTestSync(screen_physical_pixel_x,
+                                               screen_physical_pixel_y);
+     if (hit_view) {
+diff --git a/engine/src/flutter/shell/platform/windows/flutter_windows_engine.cc b/engine/src/flutter/shell/platform/windows/flutter_windows_engine.cc
+index 785a83d6..9970630a 100644
+--- a/engine/src/flutter/shell/platform/windows/flutter_windows_engine.cc
++++ b/engine/src/flutter/shell/platform/windows/flutter_windows_engine.cc
+@@ -999,6 +999,29 @@ void FlutterWindowsEngine::UpdateSemanticsEnabled(bool enabled) {
+   }
+ }
+ 
++bool FlutterWindowsEngine::RequestFullSemanticsTree() {
++  if (!engine_ || !semantics_enabled_) {
++    return false;
++  }
++  // The embedder API has no call for this. Turning semantics off and on makes
++  // the framework dispose its SemanticsOwner and create a new one, which sends
++  // the complete tree with the next frame. Only the framework is toggled: the
++  // views keep their accessibility bridges, and a bridge that did not ask
++  // applies the complete tree like any other update.
++  //
++  // The caller is inside a semantics update callback, which with merged
++  // platform and UI threads runs inside the framework's frame, so the toggle
++  // must not run the framework's handlers synchronously.
++  task_runner_->PostTask([this]() {
++    if (!engine_ || !semantics_enabled_) {
++      return;
++    }
++    embedder_api_.UpdateSemanticsEnabled(engine_, false);
++    embedder_api_.UpdateSemanticsEnabled(engine_, true);
++  });
++  return true;
++}
++
+ void FlutterWindowsEngine::OnPreEngineRestart() {
+   // Reset the keyboard's state on hot restart.
+   InitializeKeyboard();
+diff --git a/engine/src/flutter/shell/platform/windows/flutter_windows_engine.h b/engine/src/flutter/shell/platform/windows/flutter_windows_engine.h
+index 720a65a7..89534aff 100644
+--- a/engine/src/flutter/shell/platform/windows/flutter_windows_engine.h
++++ b/engine/src/flutter/shell/platform/windows/flutter_windows_engine.h
+@@ -257,6 +257,11 @@ class FlutterWindowsEngine {
+   // Informs the engine that the semantics enabled state has changed.
+   void UpdateSemanticsEnabled(bool enabled);
+ 
++  // Asks the framework to send its complete semantics tree again, after an
++  // accessibility bridge had to discard its tree. Returns false if semantics
++  // are not enabled.
++  bool RequestFullSemanticsTree();
++
+   // Returns true if the semantics tree is enabled.
+   bool semantics_enabled() const { return semantics_enabled_; }
+ 
