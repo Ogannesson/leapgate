@@ -1,4 +1,4 @@
-第三期实施契约 · 第 5 块，总述和维护者的决定见 README.md。状态：维护者 2026-10-24 确认；2026-10-25 已实施并合入 main（leapgate-server `d564e30`、leapgate-client `753c9e7e7`；两边各经三路审查和两轮复核，测试机 netns 真实 NAT 测试 6 组 × 3 次全部符合，§6.3），待维护者端到端（§6.4）。方向问题 Q1~Q9 和起草中提出的 P-A、P-B 都已由维护者拍板（AGENTS.md 2026-10-24"自研 ICE 的决定"一条，P-A、P-B 按推荐）；实施中又定了 F1、F2（§1）。本文已于 2026-10-25 按最终实现同步：实现和原稿不同的地方直接改在对应节里，必要时注明原因。同日跨网验收之后又补了控制端"输给中继窗口"的日志（§4.12，leapgate-client `e321ccf9e`，2026-10-26 合入 main `3899f91b1`），并改了 §6.4 的分类和第 8 步的取消做法，§9 加了第 24、25 条。
+第三期实施契约 · 第 5 块，总述和维护者的决定见 README.md。状态：维护者 2026-10-24 确认；2026-10-25 已实施并合入 main（leapgate-server `d564e30`、leapgate-client `753c9e7e7`；两边各经三路审查和两轮复核，测试机 netns 真实 NAT 测试 6 组 × 3 次全部符合，§6.3），待维护者端到端（§6.4）。方向问题 Q1~Q9 和起草中提出的 P-A、P-B 都已由维护者拍板（AGENTS.md 2026-10-24"自研 ICE 的决定"一条，P-A、P-B 按推荐）；实施中又定了 F1、F2（§1）。本文已于 2026-10-25 按最终实现同步：实现和原稿不同的地方直接改在对应节里，必要时注明原因。同日跨网验收之后又补了控制端"输给中继窗口"的日志（§4.12，leapgate-client `e321ccf9e`，2026-10-26 合入 main `3899f91b1`），并改了 §6.4 的分类和第 8 步的取消做法，§9 加了第 24、25 条。2026-10-28 补了被控端会话期间的 KCP 静默关闭（§2.11、§4.8.2 第 7 条、§4.12、§9 第 26 条，leapgate-client 合入 main 时的提交见总仓库的子模块指针）。
 
 # 自研 ICE：host 与 srflx 候选、独立信令、STUN 连通性检查、KCP 交接
 
@@ -736,6 +736,7 @@ G 是 A（controlling）那一端候选的优先级，D 是 B 那一端的。两
 | `KCP_HANDOFF_TIMEOUT` | 3000 毫秒 | A 的 `KcpStream::connect`、B 的 `KcpStream::accept` 用，A 的 `secure_connection` 外面也套它；这一对已被检查证明双向通，不用上游的 18 秒（`CONNECT_TIMEOUT`、`READ_TIMEOUT`） |
 | `AGENT_TTL`（B） | 10 秒（从开始收集算，紧接在接受 FORWARD、占名额之后，差一次枚举网卡，约 5~10 毫秒；`Agent::new` 不另收接受时刻） | 覆盖 A 的 `ANSWER_WAIT` 4 秒 + `CHECK_TIMEOUT` 3 秒 + 交接；到时没等到 KCP SYN 就收摊、释放名额 |
 | `MAX_AGENTS`（B） | 8 个同时 | 进程级静态量（便携运行时和界面进程在同一个进程里）；回 REJECT 也占名额；满了静默丢弃 FORWARD，不回 `BUSY`（§4.8.2） |
+| `ICE_PEER_SILENCE_CLOSE`（B） | 20 秒（会话期间每秒看一次 `peer_silent_for()`） | 控制端在 KCP 上静默满这么久就丢守卫、关会话。比控制端 `io_loop` 的 `KCP_PEER_SILENCE_LIMIT` 8 秒长：远程桌面重连要在旧连接关闭前登录上，不然"会话结束后锁屏"会误锁；空闲的 mux 和出口隧道也不会比控制端 18 秒的读超时更早断开。2026-10-28 加，§4.8.2 第 7 条、§9 第 26 条 |
 | `MAX_SOCKETS` | 8 个 / agent | 每个物理地址一个：host IPv4 最多 4 个、host IPv6 最多 4 个；srflx 复用底座 socket |
 | 候选上限 | host IPv4 4、host IPv6 4（每个 /64 一个，有临时地址只留临时地址）、srflx IPv4 4、srflx IPv6 2 | 合计 14 ≤ 16 |
 | `OFFER_SEEN_MAX`（B） | 1024 条 | 去重表；条目在 `clock_skew(ts) < −40` 时过期（§2.5 第 4 步）；满了丢新的、不淘汰旧的 |
@@ -1363,7 +1364,7 @@ pub(crate) fn on_ice_offer(ice: LeapgateIce, host: String, server: ServerPtr) {
    - 回 REJECT 的连接方式同第 5 条（新开加密 TCP、整段 `SIGNAL_TIMEOUT`、发完断开），然后还名额、结束。
 5. `let local = leapgate::ice::local_addrs().await;` 为空（没有物理候选）→ 按第 4 条回 `REJECT{UNSUPPORTED}`。否则 `tokio::join!` 并行收集（`AGENT_TTL` 从这里开始算，§2.11）（`gather(&local, &host)`）和建回 ANSWER 用的加密 TCP（照上游 WebRTC 应答的写法：`connect_tcp(&host, CONNECT_TIMEOUT)` → `secure_tcp_required(&mut s, &crate::get_key(true).await)`，`rendezvous_mediator.rs` L1158~1171；整段套 `SIGNAL_TIMEOUT`）。信令连接建不起来就收摊、还名额：ANSWER 到不了 A，A 不会读 ICE socket，B 的检查全是白发（A 那边会按 `NO_ANSWER` 收摊）。
 6. `let agent = Agent::new(gathered, peer);` 回 ANSWER 并开始检查（同时进行）：在那条连接上 `s.send(LeapgateIce { ver: 1, Answer { session, params: agent.params(), proofs } })`，发完断开；`pk` 字段留空（S→A 才填）；同时 `agent.run()`。
-7. `agent.run().await` → `Accepted { socket, remote, init_packet }`：`socket.connect(remote).await`；`KcpStream::accept(socket, Duration::from_millis(KCP_HANDOFF_TIMEOUT), Some(init_packet)).await` 得到 `(kcp_guard, stream)`；还名额；`crate::server::create_tcp_connection(server, stream, remote, true, ConnectionMeta::default()).await`；`kcp_guard` 留在作用域里直到会话结束（照 `udp_nat_listen` 的 `stream.0`，`rendezvous_mediator.rs` L1488~1497、`server.rs` L217~262）。`run` 超时或 KCP 交接失败就收摊，只打 `trace`。
+7. `agent.run().await` → `Accepted { socket, remote, init_packet }`：`socket.connect(remote).await`；`KcpStream::accept(socket, Duration::from_millis(KCP_HANDOFF_TIMEOUT), Some(init_packet)).await` 得到 `(kcp_guard, stream)`；还名额；`crate::server::create_tcp_connection(server, stream, remote, true, ConnectionMeta::default()).await`；`kcp_guard` 留在作用域里直到会话结束（照 `udp_nat_listen` 的 `stream.0`，`rendezvous_mediator.rs` L1488~1497、`server.rs` L217~262）。2026-10-28 改：`create_tcp_connection` 套在 `serve_over_kcp(kcp_guard, ICE_PEER_SILENCE_CLOSE, …)` 里，会话期间每秒看一次 `peer_silent_for()`，控制端静默满 20 秒就丢掉守卫、按上游断线流程关会话；会话自己结束时守卫交给 `release_kcp`（同第四期 K0），收尾数据和 FIN 照常发出。原稿让守卫活到会话结束，控制端崩溃或断网后被控端要等 Connection 的 30 秒超时（实测 30~50 秒）才停采集，见 §9 第 26 条。`run` 超时或 KCP 交接失败就收摊，只打 `trace`。
 8. **交给 `create_tcp_connection` 的地址是 ICE 实际选中的远端地址 `remote`**，和 TCP 局域网直连 accept 到的真实地址一致，不像上游 IPv6 打洞用 S 看到的 IPv4（`udp_nat_listen` 传 `peer_addr_v4`，`rendezvous_mediator.rs` L1497）。影响写清楚：
    - IP 白名单 `check_whitelist`（`connection.rs` L1418，`on_open` L1507 用 `addr.ip()`）会按这个地址判，所以配了白名单的 B 不做 ICE（第 4 条）；
    - 每来源未认证名额 `admit_unauthorized`（`connection.rs` L123，按 `addr.ip()` 计，`MAX_UNAUTHORIZED_CONNS_PER_ADDR`）按真实来源算；
@@ -1422,9 +1423,10 @@ features = [ ..., "Win32_System_IO" ]   # 在现有四个 feature 基础上加�
 - 输给中继窗口（上游先给出中继、等满窗口 ICE 腿还在跑，§4.8.1 竞速）：`leapgate ice: lost the relay window after <N> ms`（`<N>` 从竞速开始算到窗口结束，也就是 ICE 腿被丢掉时已经跑了多久）。2026-10-25 加：没有这一行时，这种结果在控制端日志里一行都没有，只有服务端记一行 `abandoned`，按 §6.4 的分类会被漏掉。
 - 上游直连先赢、ICE 被竞速取消，以及没有物理网卡候选（ICE 没启动）时不打日志（前者上游的结果日志已经说明了谁赢）。
 
-被控端和收包路径上的，频率可能由对端或 S 控制，按 `client/AGENTS.md` Logging 只能 `throttled_log!`（每分钟一条）或 `trace`：
+被控端和收包路径上的，频率可能由对端或 S 控制，按 `client/AGENTS.md` Logging 只能 `throttled_log!`（每分钟一条）或 `trace`（静默关闭那一行除外，见下）：
 - B 丢弃 FORWARD（前提、外形、验签、时间窗、去重、解密任一步不过，或名额满）：`leapgate ice: dropped a forwarded offer`，`info` 级 `throttled_log!`（每分钟最多一条），不打原因细节。B 回 ANSWER、REJECT 发送失败只打 `trace`（频率由让 S 转发 FORWARD 的人决定）。
 - 检查包收发、STUN 校验失败、agent 超时、KCP 交接失败：`trace`。
+- ICE 会话期间控制端在 KCP 上静默满 `ICE_PEER_SILENCE_CLOSE`（20 秒）：`leapgate ice: peer silent for <时长>, closing the session`，`info`，每个会话最多一条，不限频：它和上游关这条连接时打的 `Connection closed` 一一对应，频率不比那一行高。时长是 `Duration` 的 Debug 写法，落在 20 秒到 21 秒多（2026-10-28 加，§4.8.2 第 7 条）。
 
 ### 4.13 `client/LEAPGATE.md` 要同步的章节
 
@@ -1669,7 +1671,7 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
 5. **能力缓存按 API 根地址记，信令走会合服务器**：两者不是同一台时可能误判，干净失败（§2.12，和契约 02 §9 第 11 条同类）。另外继承 01 的两条：第一次心跳成功前、界面进程把缓存写回旧值的那几秒，`has_feature` 为假，这一次不出 ICE（契约 01 §9）。
 6. **`conn_attempt` 仍然失真，`ice_result` 不认证**。P-A 只是把 ICE 的结果另记一张表，`conn_attempt` 本身照旧（ICE 胜出时上游那一行可能是 `relay`、`direct_tcp`、`no_reply`）。算回落率要两张表按"A 的公网 IP + B 的 ID + 时间"对照（`stats` 里有口径说明，§3.8）。`ice_result` 控制端可以乱报（每来源、全局限额兜住行数，§3.9），只影响统计，不参与任何决策；`abandoned` 里混着"被竞速取消"和"控制端异常退出"两种。
 7. **会合服务器的 21116/UDP 回包源地址必须等于客户端发往的地址**：服务端绑通配地址、回包不指定源地址，多地址主机上发往次地址的 Binding 请求从主地址回包，端口受限和对称 NAT 后面的客户端收不到，拿不到 srflx 和证明，只剩 host 和 prflx。上游的 UDP 注册同样受这一条影响；部署时让会合服务器的域名只解析到回包用的那个地址，或用 `-b` 绑定。客户端认 Binding 响应只看事务号、不看来源（§2.9.3），全锥形 NAT 后面的照样拿得到。
-8. **选中后不换路径**（没有续选）：选中的地址失效（ULA 每隔几十分钟出现又消失、临时全局地址过期、换网），KCP 静默 8 秒后整次重连（`io_loop.rs` `KCP_PEER_SILENCE_LIMIT`）。MVP 让私网 IPv4 排在 IPv6 前面就是为此（Q7）。
+8. **选中后不换路径**（没有续选）：选中的地址失效（ULA 每隔几十分钟出现又消失、临时全局地址过期、换网），远程桌面这类走 `io_loop` 的会话在 KCP 静默 8 秒后整次重连（`io_loop.rs` `KCP_PEER_SILENCE_LIMIT`）；端口转发和出口隧道不自动重连，等下一个本地连接进来才重新登录（2026-10-28 读码更正，原文没分会话类型）。MVP 让私网 IPv4 排在 IPv6 前面就是为此（Q7）。
 9. **UDP 被封的网络**：ICE 失败，上游 TCP 路径和中继接住，不比现在差；ICE-TCP 在第三步。
 10. **两端都是对称 NAT、端口受限对对称 NAT，又没有 IPv6**：ICE 打不通，走中继（不做端口预测）。家宽 CGNAT 下 IPv4 能不能打通取决于运营商 NAT 是不是端点无关映射，无法保证；有原生 IPv6 时走 IPv6 host 对。
 11. **STUN 令牌桶是全局的**：被人灌满时，那一刻所有人都拿不到映射地址和证明，只剩 host 候选，公网 IPv4 候选在 S 的过滤里被去掉，不比没有 ICE 差。S 重启后旧证明全部失效，只影响那一刻正在建立的几次连接。
@@ -1694,6 +1696,10 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
 23. **控制端启用条件 `ice_enabled` 没有单元测试**：复核时的变异（去掉可信 Key 那一条）存活。它读全局配置（`LocalConfig`、能力缓存），按 `client/AGENTS.md` Tests 节不为它加测试钩子。端到端只覆盖了其中两条：配了代理（§6.4 第 9 步 (c)）和两个打洞开关（第 9 步 (e)）；可信 Key、只允许入站、`other_server`、直连 IP、`disable-udp` 这几条没有专门的验收步骤。
 24. **会合服务器离两端很远时，ICE 可能输给中继窗口**（2026-10-25 跨网验收）：ICE 比上游中继多几个经过会合服务器的往返（A 的信令连接和密钥交换、OFFER → FORWARD、B 新开信令连接和密钥交换再回 ANSWER，之后才是检查、KCP 交接和身份握手），上游中继只要打洞请求、连中继、经中继的身份握手。测试服务器在美国、到国内两端往返约 200 毫秒时，ICE 选中要 2.2~3.7 秒（多数 2.2~2.8 秒），上游中继约 1.3 秒就给出，再等 2.5 秒的窗口，ICE 落在 3.8 秒以后的就输。实测 200 次里 6 次（3%）输给窗口，此前 10 次里 1 次。会合服务器在国内时往返短得多，ICE 会快得多，预计很少输。输的那次走中继，控制端打 `lost the relay window`（§4.12），不影响连接本身。要改善只能调大 `relay-fallback-delay`（所有中继连接都多等）或减少 ICE 的往返（例如被控端复用已有的会合连接回 ANSWER，要改协议），这里不做。
 25. **被控端会话期间句柄缓慢增长，和 ICE 无关**（2026-10-25 跨网验收第 8 步重跑）：被控端主进程在会话开着时每秒约多 0.5 个内核句柄（Mutant 和 Section 成对增加），会话关掉、空闲 4 分钟都不回落；线程数（105~106）和专用字节（165~200 MB）平稳。每次约 25 秒的连接净增约 9 个；A 开 ICE 200 次（R10 → R100 每次 9.0 个）和关掉 ICE 的 200 次（每次 9.0 个）斜率相同，所以不是 ICE 的被控端 agent、socket、KCP 交接或取消路径漏的。按这个斜率，被控端连上几千次会到几万个句柄。来源没查明：客户端仓库的 `src`、`libs` 里搜不到按事件创建互斥量或共享内存（`CreateMutex`、`CreateFileMapping`、`shared_memory`）的地方（只有托盘单实例互斥量、便携服务的共享内存、剪贴板 C 代码里的一个互斥量），可能在抓屏、编解码、音频这类调用的系统库里；没和原版 RustDesk 对照测过。第 8 步"第 50 次不比第 10 次多 20%"这条判据在这种线性增长下取决于起点的句柄数，区分不了有没有泄漏（同一组数据 ICE 开着时 +31%、关掉时因起点高只有 +12%），比较 ICE 开、关两组的斜率才有意义。
+26. **被控端的 KCP 静默关闭是 20 秒，没有 consent 保活**（2026-10-28 加，维护者定）：2026-10-26 夜间复测发现，控制端异常退出后，ICE 会话在被控端要 30~50 秒才关（中继当场关），期间被控端照常采集编码。现在被控端在控制端静默满 20 秒后关会话（§4.8.2 第 7 条，日志 `leapgate ice: peer silent for …, closing the session`）。最初合入的是和控制端相同的 8 秒，审查发现两处代价，改成 20 秒（下面的数值是读码估算，假设控制端本机网络正常、被控端地址没变、用密码登录，没有实测；点击确认的会话重连要被控端再点一次确认，效果等于锁屏；细节在 `client/LEAPGATE.md` §7.10）：
+    - "会话结束后锁屏"：上游靠"旧连接关闭时，同一会话的新连接已经登录"来避免远程桌面重连时误锁（`session_reconnected`），而控制端静默满 8 秒才开始重连。被控端 8 秒就关的话，断链只要长到触发重连就几乎都会锁屏。20 秒时，会合服务器在近处，断链约 17 秒以内基本不锁；在远处（往返约 200 毫秒），约 11 秒以内不锁、11~19 秒有时会锁、约 19 秒以上会锁。原稿的 30 秒档也只扛到重连那一轮最后一次发送（9 秒那次重发）的时刻，远处约 18~19 秒、近处约 17 秒，所以近处和 20 秒一样（再长，重连那一轮约 27 秒失败）；要在远处服务器下也完全追平，阈值要约 23 秒。
+    - 端口转发和出口隧道：控制端不看 KCP 静默，空闲时靠 18 秒读超时，实际能扛约 11~18 秒的断链。20 秒不比这个早，和原稿一样；8 秒时 5~9 秒的断链就会断。断链期间一直有本地流量时，原稿能扛约 20~29 秒，现在约 18~21 秒。
+    - 链路断了约 20 秒以上、控制端其实还在时，被控端照样关会话。要分清"对端没了"和"链路暂时断了"，得做 consent 保活和续选，留在完整版（§7）。
 
 ## 10. 工作量
 
