@@ -148,7 +148,7 @@
 | S0 | leapgate-client | `exit/mod.rs` 及四个空子模块、`lang.rs`、`exit_tunnel.dart`（只有常量） | `libs/leapgate/src/lib.rs`、`Cargo.toml`、`Cargo.lock`（只改 leapgate 那一项的版本号，`:4348`） | `message.proto` 1 个字段；`src/lang.rs` H-3 |
 | 01 | leapgate-server | `src/api/exit.rs`、`migrations/0007_exit_grant.sql` | 硬分叉，不分自有和上游：`api/mod.rs`、`api/device.rs`、`api/account.rs`、`api/group.rs`、`peer.rs`、`ice_signal.rs`、`main.rs`、`cli/mod.rs`、`cli/manage.rs`、`cli/ops.rs`、测试里两处字面量、`LEAPGATE.md`（01 §3.1） | — |
 | 02 | leapgate-client | `exit/policy.rs`、`exit/dial.rs` 的内容；共用 DNS 模块（`ice/dns.rs` 挪成 `libs/leapgate/src/dns.rs`，B2）；`flutter/lib/leapgate/exit_settings.dart`（设置页的 part 文件） | `lib.rs`（加 `dns` 模块）、`ice/`（改用共用 DNS 模块，B11 复用 STUN 探测）、`lan.rs`（IPv4 前缀长度，B3 要本机链路网段；`Nic` 另加一个字段，收本机全部 IPv6 单播地址，不看 DadState、含已弃用的临时地址，在 `nics()` 的 `:425`（IPv4 的 `extend`）旁加一行 extend，和 IPv4 的收法一致，供 B3 的"本机所有网卡地址"硬拒用。现有 `ipv6` 字段的 Preferred 筛选不改：ICE 收候选（`ice/gather.rs:81`）和 `is_physical` 用它）、`options.rs`（A7 的共用判断函数 `is_leapgate_local_option`，§2.3）、`report/heartbeat.rs`（`exit` 字段，`merge_strategy` 改调 options 里的判断）、`lang.rs` 的 `CONTROLLED` 表、`Cargo.toml`（`cidr-utils = "0.5"`，主 crate 已有同版本）、`Cargo.lock` | `connection.rs`：登录守卫分支（§1.4）、B5 一处（上游端口转发分支 `enable-tunnel` 检查之后）、`connect_port_forward_if_needed` 建 mux 之后一行（M-1）、Features 一行、B8 每秒定时器约 3 行；`server/port_forward_mux.rs`：M-1~M-5 五处（见表下）；`sync.rs:296` 一行；`desktop_setting_page.dart` 2 行；`server_page.dart` 1 处判断（`isLeapgateExitAddress(client.portForward)`）加 1 行 import |
-| 03 | leapgate-client | `exit/proxy.rs`、`exit/directory.rs` 的内容；`src/leapgate_hooks/exit.rs` | `exit/mod.rs`（控制端常量和 `after_login`）、`api.rs`（`get_user`）、`lang.rs` 的 `CONTROLLER` 表、`exit_tunnel.dart`（控件）、`flutter/lib/leapgate/exit_nodes.dart`（新）、`src/leapgate_hooks.rs`（`pub(crate) mod exit;`） | `ui_session_interface.rs` H-1、`flutter_ffi.rs` H-2、`port_forward.rs` H-4/H-5（C11）、H-6 和 V-1~V-3、`port_forward_page.dart` 约 15 行、`connection_page.dart` 菜单 1 项加 1 行 import（03 §3.7、§3.8） |
+| 03 | leapgate-client | `exit/proxy.rs`、`exit/directory.rs` 的内容；`src/leapgate_hooks/exit.rs` | `exit/mod.rs`（控制端常量和 `after_login`）、`api.rs`（`get_user`）、`lang.rs` 的 `CONTROLLER` 表、`exit_tunnel.dart`（控件）、`flutter/lib/leapgate/exit_nodes.dart`（新）、`src/leapgate_hooks.rs`（`pub(crate) mod exit;`） | `ui_session_interface.rs` H-1、`flutter_ffi.rs` H-2、`port_forward.rs` H-4/H-5（C11）和 V-1~V-3（H-6 已随 K0 合入）、`port_forward_page.dart` 约 15 行、`connection_page.dart` 菜单 1 项加 1 行 import（03 §3.7、§3.8） |
 
 02 在 `server/port_forward_mux.rs` 的五处改动写死如下（行号对照 `a57605c2f`；为什么允许改上游语句见 §3.2）：
 - **M-1**：`struct PortForwardMux`（`:34-41`）加字段 `pub(super) leapgate_exit: Option<String>`（出口隧道时是控制端 ID，否则 `None`），`new()`（`:44-51`）里加一行 `leapgate_exit: None,`；`new` 的签名和 `connection.rs:1814` 的调用都不改。`connection.rs` 的 `connect_port_forward_if_needed` 在 `:1815` `});` 之后、`:1816` `return` 之前插一行：用 `:1806` 取出的原始 `pf` 判 `leapgate::exit::is_exit_target(&pf.host, pf.port)`，为真时把 `self.lr.my_id` 写进这个字段。B8 定时器也看这个字段。
@@ -165,7 +165,7 @@ proto 只在 `libs/base`，三块都不动 cardo，不需要两条 cardo 线的 
 - `lib.rs`、`Cargo.toml`、`Cargo.lock`：S0 之后只有 02 改。`src/leapgate_hooks.rs`：只有 03 改。`exit_tunnel.dart`：只有 03 改，02 只 import。
 - 上游文件两侧没有重叠。F7 例外清单就是上表"上游文件挂钩"一列里的四个 Dart 文件和 `ui_session_interface.rs`、`flutter_ffi.rs`、`lang.rs` 三处界面挂钩，新 Dart 文件都放 `flutter/lib/leapgate/`。超出清单的上游界面改动要维护者同意。
 - 本期上游 Rust 的非界面改动：`connection.rs`、`server/port_forward_mux.rs`、`sync.rs`（02），`port_forward.rs`（03）。合并上游正式版本前要再查一次 `port_forward_mux.rs`、`server/port_forward_mux.rs`、`port_forward.rs` 有没有被改（清单"写契约前还缺的事实"最后一条）。
-- `server/port_forward_mux.rs` 是 C8 下允许的上游修改：除了 03 在 `port_forward.rs` 的 V-1~V-3（只改可见性）和 H-6（一处绑定改名、`LoginOutcome` 加一个字段、返回值带上它），它是本期唯一既插入、又改上游语句（函数签名、条件、调用实参）的非界面 Rust 文件（C8 不许另写一份通道处理）。改动以 §3.1 的 M-1~M-5 为限，超出要维护者同意；合并上游时，冲突面就是这五处。
+- `server/port_forward_mux.rs` 是 C8 下允许的上游修改：除了 03 在 `port_forward.rs` 的 V-1~V-3（只改可见性）和 K0（KCP 守卫修复，含 H-6，改 `port_forward.rs`、`port_forward_mux.rs` 的几处签名和绑定，§4 第 0.5 步），它是本期唯一既插入、又改上游语句（函数签名、条件、调用实参）的非界面 Rust 文件（C8 不许另写一份通道处理）。改动以 §3.1 的 M-1~M-5 为限，超出要维护者同意；合并上游时，冲突面就是这五处。
 - `client/LEAPGATE.md`：由主会话在 02、03 都合入后，在 leapgate-client 上单独一个提交一次改完（§8.2），02、03 的 coder 都不改它。
 
 ## 4. 实施顺序
@@ -173,6 +173,7 @@ proto 只在 `libs/base`，三块都不动 cardo，不需要两条 cardo 线的 
 | 步 | 内容 |
 |---|---|
 | 0 | 整份契约经维护者确认；同时按 §8.1 改架构和笔记，和契约用同一个提交 |
+| 0.5 | **K0**（维护者 2026-10-27 定）：KCP 守卫修复单独一个提交合进 leapgate-client main，在 S0 之前。`connect_and_login`、`connect_and_login_mux` 不再丢掉 `Client::start` 返回的 `KcpStream`：`LoginOutcome` 带上它（即 03 的 H-6），`establish_tunnel` 经 `set_muxed` 交给 `tunnel_loop` 持有到隧道结束，`run_legacy` 和裸管道那条路径交给转发任务持有。只改 `src/port_forward.rs`、`src/port_forward_mux.rs` 两个上游文件，每处前一行 `// leapgate:` 注释；不改出口相关的任何东西。这是修 bug，冒烟并进第 4 步的联合冒烟（两端 Leapgate、ICE 胜出时普通 TCP 隧道能持续收发）；同时把问题报上游 |
 | 1 | S0 合进 leapgate-client main（不挪子模块指针，S0 不改任何行为） |
 | 2 | 三路并行：01 在 leapgate-server 的 `p4/exit` 分支；02 在 leapgate-client 的 `p4/exit-controlled`，03 在 `p4/exit-controller`，都从 S0 开。03 的第一个提交单独做 C11（H-4、H-5 和它们用的两个常量），出口相关的放后面的提交 |
 | 3 | 各块单测、审查后合进各自 main（merge，不 rebase main）。客户端 03 审完就可以合；02 要等 B15 (a)(b) 有了记录才合（控制端要用能开出口通道的 03 分支构建，见下面的"风险"）。后合的一方变基；按 §3.2 不会有文本冲突。01 和客户端之间没有编译依赖，合入先后不限（01 §4） |
@@ -234,7 +235,7 @@ proto 只在 `libs/base`，三块都不动 cardo，不需要两条 cardo 线的 
 - 局域网保护只约束出口模式，密码持有者照样能用普通端口转发碰局域网（A8、C15）；家宽 IPv6 前缀会变，按全局 /64 写的放行第二天就失效（B4）；路由器 fake-ip 网络里默认用不了域名，非默认 fake-ip 网段判不出，本机 strict-route 可能挡住物理网卡的 DNS（B10）；IPv6 只认本机地址所在的 /64，同一委派前缀下的其他 /64 和路由器 WAN 侧的 IPv6 地址按公网放行（02 §7）；查不到本机公网 IPv4 时少一条硬拒（B11）。
 - 出口从物理网卡出去：经出口进不了主人公司的内网，被控端网络打不开的网站经出口也打不开（B9）。
 - 资源和吞吐：被控端单会话最坏缓存两个方向各约 64 MiB、主循环卡在一次发送上最多 120 秒（B6），这段时间里 B8 关开关后的断开也会跟着推迟，1~2 秒只在正常负载下成立；发送队列共用（E7）；队头阻塞、KCP 不做拥塞控制、隧道不换路径（E4）。
-- 控制端：本地端口不认证（A10）；乐观应答（C5 (A)）；不安全确认框（C10）；连接状态不随断开更新（F4）；10 秒冷却（C9）；空闲不拆、经中继时一直占一对 hbbr 连接（C14）；重建要照上游认证（A6）；C11 之后对 1.5.0 以前的原版做不了端口转发和 RDP；Chrome、Edge 要装扩展或带启动参数（C7）；建隧道期间删除这条出口映射，要等登录结束才停（关窗口不受影响，03 §7 第 14 条）；普通映射和 RDP 经 KCP 时登录后即失效（03 §7 第 15 条）。
+- 控制端：本地端口不认证（A10）；乐观应答（C5 (A)）；不安全确认框（C10）；连接状态不随断开更新（F4）；10 秒冷却（C9）；空闲不拆、经中继时一直占一对 hbbr 连接（C14）；重建要照上游认证（A6）；C11 之后对 1.5.0 以前的原版做不了端口转发和 RDP；Chrome、Edge 要装扩展或带启动参数（C7）；建隧道期间删除这条出口映射，要等登录结束才停（关窗口不受影响，03 §7 第 14 条）。普通映射和 RDP 经 KCP 时登录后即失效的问题由 K0 修掉（§4 第 0.5 步）。
 - 服务端：状态延迟、只列 UDP 注册在线的设备、已锁定设备换主人要先登出、ID 被继承等（01 §7 的 12 条，含第 12 条：没有主人的已锁定设备，登录先到先得）。
 
 ## 8. 要同步的文档
