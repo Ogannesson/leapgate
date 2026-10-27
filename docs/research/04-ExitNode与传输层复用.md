@@ -79,7 +79,7 @@ hbbs 公钥对不上或者没配时，会**回退成不加密**（`"pk mismatch,
 - **能。** mux 已经是一个"加密的、带流控的多路 TCP 字节流"通道，Exit Node 的应用层代理可以直接复用。**[码]**
 - 可能的瓶颈：**[推]**
   1. **单 channel 窗口 256 KiB**，单条 TCP 流的吞吐上限约为窗口除以 RTT。RTT 30 ms 时约 8.7 MB/s（≈70 Mbit/s），RTT 100 ms 时约 2.6 MB/s（≈21 Mbit/s），RTT 200 ms 时约 10 Mbit/s。大文件下载、测速这类单流场景会明显受限，要调大窗口，或者改成按 BDP 自适应。
-  2. **整条隧道只有一个底层流**：TCP 上有队头阻塞，丢一个包所有 channel 一起卡；如果底层是 TCP，再在里面套被代理的 TCP，就是 TCP-over-TCP。KCP 和 WebRTC 底层没有这个问题。
+  2. **整条隧道只有一个底层流**：TCP 上有队头阻塞，丢一个包所有 channel 一起卡；如果底层是 TCP，再在里面套被代理的 TCP，就是 TCP-over-TCP。KCP 和 WebRTC 底层没有这个问题。（2026-10-27 更正：KCP 也是可靠有序流，同样有队头阻塞；SOCKS/CONNECT 是应用层代理，被代理的 TCP 在控制端本地终结，不构成 TCP-over-TCP。见 `docs/research/第四期/03-设计决策清单.md` E4。）
   3. **单任务串行**：客户端 `tunnel_loop` 和被控端主循环都是一个 select 循环，加解密和收发在同一个任务里串行做，高带宽时可能单核吃满。
   4. **KCP turbo 不做拥塞控制**：长时间大流量时可能挤占链路、丢包放大。
   5. **超时**：会话 30 秒没有收到数据就断（`connection.rs` 的 `SEC30`），mux 有 TestDelay 心跳，问题不大。
