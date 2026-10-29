@@ -438,6 +438,9 @@ body{margin:0;background:var(--page-bg);color:var(--page-fg);font-family:var(--p
 .sh-screen>h2+p{max-width:46em}
 .sh-hero h1{font-size:clamp(40px,7vw,96px)}
 #p6m-360{width:360px}
+.sh-code{font-family:ui-monospace,Consolas,"Courier New",monospace !important;font-weight:400 !important;font-size:13px !important;background:var(--page-card);border-radius:6px;padding:1px 6px;overflow-wrap:anywhere}
+/* 指向其他样稿的链接不在文件名中间断行 */
+.sh-lead a,.sh-foot a{white-space:nowrap}
 
 /* ---- 来自 A-P4 的面板、遮罩和对话框 ---- */
 /* 遮罩、底部面板 */
@@ -517,10 +520,14 @@ body{margin:0;background:var(--page-bg);color:var(--page-fg);font-family:var(--p
 .frame .s-clr{margin-left:0}
 .frame .s-row .av{width:40px;height:40px;font-size:var(--lg-fs-n)}
 .frame .s-row .tile{width:40px;height:40px}
+.frame .s-row .tile.c-connecting{color:var(--lg-connecting)}
 .frame .s-row.s-act{gap:var(--lg-sp-4);color:var(--lg-accent);font-weight:700;padding-left:var(--lg-sp-4)}
 .frame .s-row.s-act .s-t{color:var(--lg-accent)}
 .frame .s-note{padding:var(--lg-sp-2) var(--lg-sp-2) var(--lg-sp-3);font-size:var(--lg-fs-m);line-height:var(--lg-lh-m);color:var(--lg-text2)}
 .frame .s-key{margin-top:2px;font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:var(--lg-fs-m);line-height:var(--lg-lh-m);color:var(--lg-text2);letter-spacing:0}
+/* 快捷键行：有绑定（右边有清除图标）和没绑定（只写“未设置”）一样高，组合键太长时换行而不撑宽 */
+.frame .s-row.s-k{min-height:68px}
+.frame .s-row.s-k .s-key{overflow-wrap:anywhere}
 .frame .s-bn{margin-bottom:var(--lg-sp-3);font-size:var(--lg-fs-m);line-height:var(--lg-lh-m)}
 .frame .s-bt{margin-top:var(--lg-sp-3)}
 .frame .s-copy{margin-top:var(--lg-sp-6);text-align:center;font-size:var(--lg-fs-s);line-height:var(--lg-lh-s);color:var(--lg-text2)}
@@ -555,6 +562,8 @@ body{margin:0;background:var(--page-bg);color:var(--page-fg);font-family:var(--p
 .frame .s-vf{position:absolute;left:50%;top:50%;width:264px;height:264px;margin:-170px 0 0 -132px;border-radius:var(--lg-r-28);box-shadow:0 0 0 1000px var(--lg-scrim);display:grid;place-items:center}
 .frame .s-br{position:absolute;left:50%;top:50%;margin:-170px 0 0 -132px;color:var(--lg-accent)}
 .frame .s-qr{width:176px;height:176px;border-radius:var(--lg-r-12);background:var(--lg-surface);color:var(--lg-text);display:grid;place-items:center}
+/* 假二维码：136 见方，颜色取 .s-qr 的文字色（路径里已设 currentColor 和 crispEdges） */
+.frame .s-qr .s-qrs{display:block;flex:none;width:136px;height:136px}
 .frame .snk{position:absolute;left:var(--lg-sp-4);right:var(--lg-sp-4);bottom:var(--lg-sp-8);min-height:56px;display:flex;align-items:center;gap:var(--lg-sp-3);padding:var(--lg-sp-3) var(--lg-sp-4);border-radius:var(--lg-r-16);background:var(--lg-float);box-shadow:var(--lg-shadow);font-size:var(--lg-fs);line-height:var(--lg-lh)}
 .frame .snk .ic{color:var(--lg-error)}
 .frame .s-empty{position:absolute;left:var(--lg-sp-8);right:var(--lg-sp-8);top:84px;bottom:0;display:flex;flex-direction:column;align-items:center;padding-top:calc(var(--lg-sp-8) * 3);text-align:center}
@@ -695,7 +704,7 @@ body{margin:0;background:var(--page-bg);color:var(--page-fg);font-family:var(--p
 </div>
 <div class="sh-lead">
 <p><b>首屏先看什么。</b>设置分两组：“传出连接”是本机去连别的设备时怎么走，“通用”是外观、服务器和账号。进来先看到的是“打洞直连”，它决定能不能直连；往下每一行都把当前值摆在行上，开关直接切，选择类的点一下从底部弹出面板。</p>
-<p><b>怎么看这一页。</b>画框是 Android 竖屏 390×844，另有一张 360×800 抽查。一页放不下的画两张：首屏，和宽度不变、画框按内容拉高的“整页”。可点的东西都不小于 48×48：行高 56 起，图标按钮 48×48，开关用 A-基础 的共用开关，整行都能点。手机设置页在详细模式下没有可见变化，所以本页没有详细模式画框。令牌见 <a href="https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26" target="_blank" rel="noopener">A-基础</a>（<span class="sh-code">https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26</span>）。</p>
+<p><b>怎么看这一页。</b>画框是 Android 竖屏 390×844，另有一张 360×800 抽查。一页放不下的画两张：首屏，和宽度不变、画框按内容拉高的“整页”。可点的东西都不小于 48×48：行高 56 起，图标按钮 48×48，开关用 <a href="https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26" target="_blank" rel="noopener">A-基础</a> 的共用开关，整行都能点。手机设置页在详细模式下没有可见变化，所以本页没有详细模式画框。令牌见 <a href="https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26" target="_blank" rel="noopener">A-基础</a>（<span class="sh-code">https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26</span>）。</p>
 <dl class="sh-facts">
 <dt>画了几张</dt><dd>29 张，浅色全画，深色三张：设置首页首屏和整页、服务器对话框</dd>
 <dt>尺寸</dt><dd>会改变整屏布局的状态画整屏；只改一块的状态画裁切画框</dd>
@@ -720,8 +729,8 @@ body{margin:0;background:var(--page-bg);color:var(--page-fg);font-family:var(--p
 <li>说明里没写、本页自拟的界面文字：无障碍名称“返回”“扫码导入服务器配置”“从相册选择”“打开闪光灯”“复制版本”“复制本机 ID”“清除“‹操作名›”的快捷键”；语言面板里的语言名单（说明只写“其余每项写该语言自己的名字”，名单自拟，顺序按语言代码）；“录制文件位置”的 Android 示例路径；扫码页“未获得相机权限”下的按钮“打开系统设置”；服务器对话框扫码预填一张里的示例 Key；代理“无法解析此地址”一张里的示例地址 socks5://proxy.example.com:1080；“界面模式”一行没写说明文字（说明表里只有“简洁 / 详细”）。其余文字都取自说明。</li>
 <li>说明没规定、本页自己定的版式：快捷键二级页每行是操作名加等宽组合键，点一行修改，有绑定时右边一个“清除”图标（说明写的是桌面上“修改”“清除”两个文字按钮）；手机上哪些操作出现在快捷键列表里，说明没列，这里照上游按平台过滤的结果（<span class="sh-code">shortcut_model.dart:206-236</span>）去掉手机没有的操作：整个“窗口和标签”组、全部显示器、截图、交换控制方向、允许复制粘贴文件、键盘模式三项、显示本机光标、光标随画面缩放、相对鼠标模式，“重置画布”放进“画面”组，列表里同名的几行加了子组前缀（“编码：自动”“隐私模式：遮挡屏幕”）以免只写“自动”看不出是什么；服务器一行的摘要下面加了一行“修改”（桌面 §1.5.2 有这个按钮，手机 §1.7 没写，不加就看不出点哪里能改）；设置首页的卡片分组（连接、会话、外观、服务器和网络、硬件编解码、账号、关于）是为了让“高级”小标题只管它下面那一行，不是说明里的小节。</li>
 <li>补充的画框（说明的清单里没有）：画质选“自定义”、快捷键“将组合键发送到远程设备”打开、退出登录确认、扫码识别后打开预填的服务器对话框、代理对话框的“无法解析此地址”（桌面清单有，手机清单只写了“代理对话框”）。没画“设了代理时的警告”：说明 §1.7 写手机的代理开启前不再确认，首页“代理”一行的说明已经是那半句。</li>
-<li>新增图标 4 个，风格同 <a href="https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26" target="_blank" rel="noopener">A-基础</a>：<span class="sh-code">i-arrow-l</span>（返回箭头）、<span class="sh-code">i-qr-scan</span>（扫码）、<span class="sh-code">i-camera-off</span>（没有相机权限）、<span class="sh-code">i-external</span>（在浏览器里打开的链接），定义在本页“本页新增图标”一段，之后并进 A-基础。扫码取景框的四个角和那张假二维码是本页专用图形，不是图标。</li>
+<li>新增图标 4 个，风格同 <a href="https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26" target="_blank" rel="noopener">A-基础</a>：<span class="sh-code">i-arrow-l</span>（返回箭头）、<span class="sh-code">i-qr-scan</span>（扫码）、<span class="sh-code">i-camera-off</span>（没有相机权限）、<span class="sh-code">i-external</span>（在浏览器里打开的链接），定义在本页“本页新增图标”一段，之后并进 <a href="https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26" target="_blank" rel="noopener">A-基础</a>。扫码取景框的四个角和那张假二维码是本页专用图形，不是图标。</li>
 <li>图标全部取自 <a href="https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26" target="_blank" rel="noopener">A-基础</a>；手机顶部状态栏的信号和电量是系统自带的，不算产品图标。其他样稿：<a href="https://claude.ai/code/artifact/76a8eaa6-b51f-41b9-9f7a-e946f6e832a3" target="_blank" rel="noopener">A-P1</a>、<a href="https://claude.ai/code/artifact/0e20634d-fb4d-45af-9d7c-cb25aef0de82" target="_blank" rel="noopener">A-P2</a>、<a href="https://claude.ai/code/artifact/f453e0ff-4e1a-4790-b015-2705351a474a" target="_blank" rel="noopener">A-P3</a>、<a href="https://claude.ai/code/artifact/5038d0fd-4301-4561-8340-fb672a67d19e" target="_blank" rel="noopener">A-P4</a>、<a href="https://claude.ai/code/artifact/5d454df0-5fe6-4ba3-bbde-551eaf9af7d3" target="_blank" rel="noopener">A-P5</a>。</li>
-<li>配色用 2026-10-29 定的“适度”档。设备身份色在设置页里不出现；账号头像是人，用强调色。开关用 A-基础 的共用开关：关闭时是描边加左边的圆点，打开时是强调色底加右边的圆点，圆点的位置也表示状态，不只靠颜色。</li>
+<li>配色用 2026-10-29 定的“适度”档。设备身份色在设置页里不出现；账号头像是人，用强调色。开关用 <a href="https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26" target="_blank" rel="noopener">A-基础</a> 的共用开关：关闭时是描边加左边的圆点，打开时是强调色底加右边的圆点，圆点的位置也表示状态，不只靠颜色。</li>
 </ul></footer>
 </div>
