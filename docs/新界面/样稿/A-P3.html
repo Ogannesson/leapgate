@@ -342,9 +342,11 @@
 /* 设备卡片和手机卡片的平台图标块：身份浅底加身份深字；列表行的平台图标只取身份深字 */
 .frame [data-k] .tile{background:var(--it);color:var(--ii)}
 .frame [data-k] .pf{color:var(--ii)}
-/* 会话标签顶部一条身份色；主页标签（选中且没有 data-k）用强调色；被控端小窗里来访者的标签也有 */
+/* 会话标签顶部一条身份色；被控端小窗里来访者的标签也有。选中且没有 data-k 的标签（主页标签、被控端侧栏的标题标签）一律用强调色，
+   不经过 --is：小窗的 .frame 上写着来访者的 data-k，后代会继承它的 --is，不能让侧栏标签取到。小窗顶部 .cm-tabs 里的来访者标签例外，仍取 --is */
 .frame .tab{position:relative}
 .frame .tab[data-k]::before,.frame .tab.sel:not([data-k])::before,.frame.cm .cm-tabs .tab::before{content:"";position:absolute;left:12px;right:12px;top:0;height:var(--lg-strip);border-radius:0 0 3px 3px;background:var(--is,var(--lg-accent))}
+.frame .tab.sel:not([data-k]):not(.cm-tabs .tab)::before{background:var(--lg-accent)}
 /* 被控端小窗：信息头整块是固定的浅青功能底，不随来访者变；来访者的身份只在头像和标签顶条上 */
 .frame.cm .cm-tabs .tab.sel{background:var(--lg-cmband)}
 .frame.cm .cm-head .av.l{background:var(--is,var(--lg-accent));color:var(--lg-on-k)}

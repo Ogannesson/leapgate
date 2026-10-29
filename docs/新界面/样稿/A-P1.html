@@ -342,9 +342,11 @@
 /* 设备卡片和手机卡片的平台图标块：身份浅底加身份深字；列表行的平台图标只取身份深字 */
 .frame [data-k] .tile{background:var(--it);color:var(--ii)}
 .frame [data-k] .pf{color:var(--ii)}
-/* 会话标签顶部一条身份色；主页标签（选中且没有 data-k）用强调色；被控端小窗里来访者的标签也有 */
+/* 会话标签顶部一条身份色；被控端小窗里来访者的标签也有。选中且没有 data-k 的标签（主页标签、被控端侧栏的标题标签）一律用强调色，
+   不经过 --is：小窗的 .frame 上写着来访者的 data-k，后代会继承它的 --is，不能让侧栏标签取到。小窗顶部 .cm-tabs 里的来访者标签例外，仍取 --is */
 .frame .tab{position:relative}
 .frame .tab[data-k]::before,.frame .tab.sel:not([data-k])::before,.frame.cm .cm-tabs .tab::before{content:"";position:absolute;left:12px;right:12px;top:0;height:var(--lg-strip);border-radius:0 0 3px 3px;background:var(--is,var(--lg-accent))}
+.frame .tab.sel:not([data-k]):not(.cm-tabs .tab)::before{background:var(--lg-accent)}
 /* 被控端小窗：信息头整块是固定的浅青功能底，不随来访者变；来访者的身份只在头像和标签顶条上 */
 .frame.cm .cm-tabs .tab.sel{background:var(--lg-cmband)}
 .frame.cm .cm-head .av.l{background:var(--is,var(--lg-accent));color:var(--lg-on-k)}
@@ -468,6 +470,9 @@ body{margin:0;background:var(--page-bg);color:var(--page-fg);font-family:var(--p
 .frame .stline.wrap{align-items:flex-start}
 .frame .stline.wrap svg{margin-top:5px}
 .frame .acct.sel{background:var(--lg-surface2);border-radius:var(--lg-r-12)}
+/* 人（账号、同组设备里的人员）的头像用中性底，不用强调色和身份色（说明 §2.4）；选中行的底和中性底太近，头像改用面板底色 */
+.frame .av{background:var(--lg-border);color:var(--lg-text)}
+.frame .acct.sel .av,.frame .pp.sel .av{background:var(--lg-surface)}
 .frame .acctout{margin-top:auto;padding-top:var(--lg-sp-3)}
 .frame .rmd{display:inline-flex;color:var(--lg-warning);margin-left:var(--lg-sp-2)}
 .frame .rmd+.badge{margin-left:var(--lg-sp-1)}
@@ -543,7 +548,7 @@ body{margin:0;background:var(--page-bg);color:var(--page-fg);font-family:var(--p
 /* 地址簿、同组设备 */
 .frame .bk{display:flex;align-items:center;gap:var(--lg-sp-3);margin-top:var(--lg-sp-5);height:var(--lg-h-btn)}
 .frame .bksw{height:var(--lg-h-btn);padding:0 var(--lg-sp-3) 0 var(--lg-sp-4);border-radius:var(--lg-r-10);box-shadow:inset 0 0 0 1.5px var(--lg-border-strong);background:var(--lg-surface);display:flex;align-items:center;gap:var(--lg-sp-2);font-weight:700;font-size:var(--lg-fs)}
-.frame .bksw.open{box-shadow:inset 0 0 0 2px var(--lg-accent)}
+.frame .bksw.open{background:var(--lg-active);color:var(--lg-accent);box-shadow:inset 0 0 0 2px var(--lg-accent)}
 .frame .bkp{color:var(--lg-text2);font-size:var(--lg-fs-m)}
 .frame .tgf{display:flex;align-items:center;gap:var(--lg-sp-2);margin-top:var(--lg-sp-3);flex-wrap:wrap}
 .frame .tf{height:var(--lg-h-btn);padding:0 var(--lg-sp-3);border-radius:var(--lg-r-10);background:color-mix(in oklab,var(--c,var(--lg-text2)) var(--lg-tag-mix),transparent);display:inline-flex;align-items:center;gap:var(--lg-sp-2);font-size:var(--lg-fs-m);white-space:nowrap}
@@ -781,11 +786,11 @@ body{margin:0;background:var(--page-bg);color:var(--page-fg);font-family:var(--p
 <li>“浏览器设置说明”的四条不是先后步骤（Firefox 和 Chrome 二选一），用项目符号，不用序号。</li>
 <li>服务器报错横幅写成两句，各以句号结尾（§7.6 第 8 条）：“无法加载地址簿。服务器返回：服务暂时不可用。”，添加设备对话框里的服务器报错也是这个两句式：“无法添加设备。服务器返回：服务暂时不可用。”。示例原文是我拟的；横幅和 <a href="https://claude.ai/code/artifact/5038d0fd-4301-4561-8340-fb672a67d19e" target="_blank" rel="noopener">A-P4</a>（<span class="sh-code">https://claude.ai/code/artifact/5038d0fd-4301-4561-8340-fb672a67d19e</span>）里的同一条横幅逐字相同。</li>
 <li>图标都取自 <a href="https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26" target="_blank" rel="noopener">A-基础</a>（<span class="sh-code">https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26</span>）：设置用 i-gear，网络错误用 i-wifi-off，出口用 i-exit，排序 i-sort，拖动把手 i-grip，复制 i-copy。P1 的菜单行没有图标，所以没用到 i-key-off。没有自己画新图标。装饰性图标没写 aria-hidden（1000 多个 svg 省约 20 KB，这些 svg 没有标题和描述，读屏会跳过）。</li>
-<li>配色（2026-10-29，说明 §2.4、§8.3 Q14，四档对比见 <a href="https://claude.ai/code/artifact/0b642475-a961-41c1-829d-c896da38d56f" target="_blank" rel="noopener">A-配色调整</a>（<span class="sh-code">https://claude.ai/code/artifact/0b642475-a961-41c1-829d-c896da38d56f</span>））：整体用“适度”，令牌取值以 <a href="https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26" target="_blank" rel="noopener">A-基础</a>（<span class="sh-code">https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26</span>） 为准。左栏（本机区、服务状态、被控提示、导航）用“微调”的做法：本机区仍是白色面板上的 ID 和密码，导航选中项是浅青底，ID 下三条横线是强调色，“正在被远程控制”是灰底。</li>
-<li>身份色：设备卡片、列表行、出口卡片和出口目录行里的设备，以及会话标签，都按 A-基础 的指派表写 <span class="sh-code">data-k</span>，同一台设备处处同色（办公室电脑和工作室绘图电脑同色，老王的 MacBook 和爸爸的台式机同色，是指派表里有意安排的撞色）。本机区、账号头像、同组设备的人员头像不用身份色：本机不是另一台设备，人员头像表示的是人，不是设备。</li>
+<li>配色（2026-10-29，说明 §2.4、§8.3 Q14，四档对比见 <a href="https://claude.ai/code/artifact/0b642475-a961-41c1-829d-c896da38d56f" target="_blank" rel="noopener">A-配色调整</a>（<span class="sh-code">https://claude.ai/code/artifact/0b642475-a961-41c1-829d-c896da38d56f</span>））：整体用“适度”，令牌取值以 <a href="https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26" target="_blank" rel="noopener">A-基础</a>（<span class="sh-code">https://claude.ai/code/artifact/bd2c565f-91d7-4b09-b706-12e6284cad26</span>）为准。左栏（本机区、服务状态、被控提示、导航）用“微调”的做法：本机区仍是白色面板上的 ID 和密码，导航选中项是浅青底，ID 下三条横线是强调色，“正在被远程控制”是灰底。</li>
+<li>身份色：设备卡片、列表行、出口卡片和出口目录行里的设备，以及会话标签，都按 A-基础 的指派表写 <span class="sh-code">data-k</span>，同一台设备处处同色（办公室电脑和工作室绘图电脑同色，老王的 MacBook 和爸爸的台式机同色，是指派表里有意安排的撞色）。本机区、账号头像、同组设备的人员头像不用身份色：本机不是另一台设备，人员头像表示的是人，不是设备；这两种头像用中性底、正文色字，选中的行上改用面板底色，免得和行底融在一起。</li>
 <li>标签：卡片、列表行、地址簿的标签筛选条和添加设备里的标签选择，都是带标签色浅底的小块，名字用正文色；筛选条和对话框里选中的标签用强调色描边加勾，不用标签色铺底。</li>
-<li>展开着的菜单按钮：“视图”“排序”“更多”和卡片的“⋯”在菜单展开时是按下态（强调色叠加底加强调色字）。</li>
+<li>展开着的菜单按钮：“视图”“排序”“更多”、地址簿切换和卡片的“⋯”在菜单展开时是按下态（强调色叠加底加强调色字）。</li>
 <li>对比度（2026-10-29 复算）：用 Chrome 对每个画框里的每个文字、图标元素取计算样式，半透明的底先合成再算，不是按令牌表抄的值。107 个画框各按浅色、深色算了一遍（画的是浅色的也切到深色算），每遍 3596 个元素（2056 处文字、991 个图标），全部达到 AA：文字和图标最低，浅色 4.61、深色 4.54（要求 4.5:1）；ID 下的横线最低 6.68，会话标签顶条最低 3.41，输入框和按钮的描边最低 3.64（要求 3:1）。禁用和灰显的控件（58 个元素）不计。标签色点是用户自选的颜色，只记录不作要求，最低 2.74（高亮或选中的卡片上，色点压在标签浅底上）。</li>
-<li>本页对共用块做的覆盖，都是本页专用样式：选中的卡片和高亮的搜索结果行，强调色叠加压在行自己的表面上（原来压在窗口底上，在线、离线小字低于 4.5:1）；列表行里标签块之间的空隙收窄，最小窗口的详细模式调整了列宽，两个标签才放得下；“正在登录…”这类进行中的按钮，字改用正文色（深色底上灰字不到 4.5:1）。</li>
+<li>本页对共用块做的覆盖，都是本页专用样式：选中的卡片和高亮的搜索结果行，强调色叠加压在行自己的表面上（原来压在窗口底上，在线、离线小字低于 4.5:1）；列表行里标签块之间的空隙收窄，最小窗口的详细模式调整了列宽，两个标签才放得下；头像（账号、人员）改中性底，地址簿切换展开时加按下态的底；“正在登录…”这类进行中的按钮，字改用正文色（深色底上灰字不到 4.5:1）。</li>
 </ul></footer>
 </div>
