@@ -18,7 +18,9 @@
     Connect        leapgate.exe --connect -PeerId [--password <-PasswordFile>]; with -CancelAfterMs,
                    stop this endpoint that long after the session starts (a true cancel: closing
                    the session window does not stop a connection that is being set up)
-    CloseSessions  post WM_CLOSE to this deployment's windows except the main window
+    CloseSessions  upstream UI: post WM_CLOSE to this deployment's windows except the main window;
+                   new UI (main window class LEAPGATE_UI_MAIN): post WM_CLOSE to the main window,
+                   which ends every session tab when its close options are preset
     Stop           kill every process whose image is -Dir\leapgate.exe (nothing else)
     Logs           log lines from -Since (and before -Until) that match -Pattern
     Stats          handles, threads and private bytes of this deployment's processes
@@ -343,8 +345,21 @@ public delegate bool EnumProc(System.IntPtr h, System.IntPtr l);
         $true
     }
     [LeapgateE2e.Win]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
-    # Session windows are the multi-window plugin's; the main window is the Flutter runner's.
-    # A closed session window stays visible for a moment, so wait a few seconds before checking again.
+    # The new UI keeps sessions as tabs in its main window: closing that window disconnects them
+    # all and hides the window, and the process stays up as the controlled side. That needs the
+    # close confirmation off and "run in the background" remembered, set beforehand with
+    # Configure -LocalOption (plan 03 §8.6).
+    $newUi = @($wins | Where-Object Class -eq 'LEAPGATE_UI_MAIN')
+    if ($newUi.Count) {
+        foreach ($w in $newUi) {
+            [LeapgateE2e.Win]::PostMessage($w.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            "closed '$($w.Title)' ($($w.Class))"
+        }
+        return
+    }
+    # Upstream UI: session windows are the multi-window plugin's; the main window is the Flutter
+    # runner's. A closed session window stays visible for a moment, so wait a few seconds before
+    # checking again.
     foreach ($w in $wins) {
         if ($w.Class -ne 'RustdeskMultiWindow') { "kept '$($w.Title)' ($($w.Class))"; continue }
         [LeapgateE2e.Win]::PostMessage($w.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
