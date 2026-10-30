@@ -8,7 +8,8 @@
   先跑 setup-toolchain.ps1。步骤（-Steps 可只跑其中几步，默认全跑）：
     vcpkg   按客户端 vcpkg.json 编 C 依赖（x64-windows-static，二进制缓存在构建目录）
     patch   跑上游的 Flutter 3.44 源码补丁脚本（已打过会跳过），再用本目录钉住的 pubspec.lock 覆盖
-    bridge  生成 flutter_rust_bridge 桥接代码（缺文件或 flutter_ffi.rs 更新过才生成，-ForceBridge 强制）
+    bridge  生成 flutter_rust_bridge 桥接代码，两块：flutter_ffi.rs 和 leapgate_ffi.rs
+            （缺文件或两个 ffi 文件更新过才生成，-ForceBridge 强制）
     build   python build.py --portable --flutter --skip-portable-pack --hwcodec [--vram]
             之前核对 SDK 缓存里的引擎是 build-engine.ps1 -Install 用当前补丁装的自编版，不是就停下
   patch、bridge、build 会改动 -Source 里被跟踪的文件（common.dart、pubspec.yaml、pubspec.lock），
@@ -21,6 +22,8 @@ param(
     [Parameter(Mandatory)][string]$Source,
     [string]$BuildRoot,
     [ValidateSet('vcpkg', 'patch', 'bridge', 'build')][string[]]$Steps = @('vcpkg', 'patch', 'bridge', 'build'),
+    # 编哪个界面：upstream 是上游的 flutter\，leapgate 是新界面 leapgate_ui\（docs/新界面/03-实施方案.md §1.7）
+    [ValidateSet('upstream', 'leapgate')][string]$Ui = 'upstream',
     [switch]$ForceBridge,
     # 关掉 D3D11 纹理零拷贝上屏（vram 特性），退回软件上屏
     [switch]$NoVram,
@@ -60,20 +63,36 @@ try {
     }
 
     # ---- bridge ----
+    # 两块（docs/新界面/03-实施方案.md §1.4）：块 1 是上游的 flutter_ffi.rs，块 2 是 Leapgate 的 leapgate_ffi.rs。
+    # Rust 侧两个界面共用一份，所以不管编哪个界面都生成两块，只是 Dart 和 C 头落的地方不同；
+    # 编旧界面时块 2 的 Dart 留在 flutter\lib 里不用，也不提交
     if ('bridge' -in $Steps) {
         $log = Join-Path $L.Logs "$stamp-bridge.log"
-        $outputs = 'src\bridge_generated.rs', 'src\bridge_generated.io.rs', 'flutter\lib\generated_bridge.dart',
-            'flutter\lib\generated_bridge.freezed.dart', 'flutter\macos\Runner\bridge_generated.h'
-        $ffi = Get-Item src\flutter_ffi.rs
-        $stale = $ForceBridge -or ($outputs | Where-Object { -not (Test-Path $_) -or (Get-Item $_).LastWriteTime -lt $ffi.LastWriteTime })
+        $dartRoot, $cDir = if ($Ui -eq 'leapgate') { 'leapgate_ui\core', 'leapgate_ui\core' } else { 'flutter', 'flutter\macos\Runner' }
+        $cOutputs = "$cDir\bridge_generated.h", "$cDir\bridge_generated_leapgate.h"
+        $dartOutputs = "$dartRoot\lib\generated_bridge.dart", "$dartRoot\lib\generated_bridge_leapgate.dart"
+        $outputs = @('src\bridge_generated.rs', 'src\bridge_generated.io.rs', 'src\leapgate_bridge\bridge_generated.rs',
+            'src\leapgate_bridge\bridge_generated.io.rs', "$dartRoot\lib\generated_bridge.freezed.dart") + $dartOutputs + $cOutputs
+        $ffiTime = (Get-Item src\flutter_ffi.rs, src\leapgate_ffi.rs | Measure-Object LastWriteTime -Maximum).Maximum
+        $stale = $ForceBridge -or ($outputs | Where-Object { -not (Test-Path $_) -or (Get-Item $_).LastWriteTime -lt $ffiTime })
         if ($stale) {
-            Push-Location flutter
+            Push-Location $dartRoot
             try { Invoke-Logged $log flutter.bat @('pub', 'get') } finally { Pop-Location }
-            Invoke-Logged $log flutter_rust_bridge_codegen.exe @('--rust-input', './src/flutter_ffi.rs',
-                '--dart-output', './flutter/lib/generated_bridge.dart',
-                '--c-output', './flutter/macos/Runner/bridge_generated.h',
-                '--llvm-path', $L.Llvm)
-            Copy-Item flutter\macos\Runner\bridge_generated.h flutter\ios\Runner\bridge_generated.h
+            # codegen 要求 C 头已经存在（按绝对路径解析）；生成块 1 时 cbindgen 会顺着 leapgate_ffi.rs 的
+            # #[path] 去读块 2 的 Rust 输出，所以它也要先有（空文件即可）。块 2 的输出目录自带 .gitignore
+            foreach ($f in $cOutputs + 'src\leapgate_bridge\bridge_generated.rs') {
+                if (-not (Test-Path $f)) { New-Item -ItemType File -Force $f | Out-Null }
+            }
+            # --c-output 每块写一次（不收多值）；--class-name 必须给，否则多块时块 1 的类名保不住
+            $rel = { param($p) "./$($p -replace '\\', '/')" }
+            $codegenArgs = @('--rust-input', './src/flutter_ffi.rs', './src/leapgate_ffi.rs', '--dart-output') +
+                @($dartOutputs | ForEach-Object { & $rel $_ }) +
+                @('--rust-output', './src/bridge_generated.rs', './src/leapgate_bridge/bridge_generated.rs',
+                    '--class-name', 'Rustdesk', 'Leapgate',
+                    '--c-output', (& $rel $cOutputs[0]), '--c-output', (& $rel $cOutputs[1]),
+                    '--skip-add-mod-to-lib', '--llvm-path', $L.Llvm)
+            Invoke-Logged $log flutter_rust_bridge_codegen.exe $codegenArgs
+            if ($Ui -ne 'leapgate') { Copy-Item $cOutputs flutter\ios\Runner\ }
         } else {
             Write-Host '桥接代码是新的，跳过生成（-ForceBridge 可强制）'
         }
