@@ -1,0 +1,343 @@
+diff --git a/engine/src/flutter/shell/platform/common/accessibility_bridge.cc b/engine/src/flutter/shell/platform/common/accessibility_bridge.cc
+index 0375cd5d..6b161f31 100644
+--- a/engine/src/flutter/shell/platform/common/accessibility_bridge.cc
++++ b/engine/src/flutter/shell/platform/common/accessibility_bridge.cc
+@@ -4,7 +4,9 @@
+ 
+ #include "accessibility_bridge.h"
+ 
++#include <algorithm>
+ #include <functional>
++#include <unordered_set>
+ #include <utility>
+ 
+ #include "flutter/third_party/accessibility/ax/ax_tree_manager_map.h"
+@@ -19,6 +21,9 @@ constexpr int kHasScrollingAction =
+     FlutterSemanticsAction::kFlutterSemanticsActionScrollUp |
+     FlutterSemanticsAction::kFlutterSemanticsActionScrollDown;
+ 
++// The framework's root semantics node always has this id.
++constexpr AccessibilityNodeId kFrameworkRootId = 0;
++
+ // AccessibilityBridge
+ AccessibilityBridge::AccessibilityBridge()
+     : tree_(std::make_unique<ui::AXTree>()) {
+@@ -65,6 +70,8 @@ void AccessibilityBridge::CommitUpdates() {
+     return;
+   }
+ 
++  DropUnreachableNodes();
++
+   // AXTree cannot move a node in a single update.
+   // This must be split across two updates:
+   //
+@@ -150,6 +157,92 @@ void AccessibilityBridge::CommitUpdates() {
+   event_generator_.ClearEvents();
+ }
+ 
++void AccessibilityBridge::DropUnreachableNodes() {
++  // ui::AXTree rejects a whole update if any node in it cannot be reached
++  // from the root. The framework sends such nodes: an OverlayPortal anchor
++  // merged into its parent is sent although the parent lists no children
++  // (fixed by flutter/flutter#186118), and overlay content is sent under an
++  // anchor that is not sent (flutter/flutter#190357, flutter/flutter#182444,
++  // partly fixed by flutter/flutter#193372). The complete tree that
++  // ResetAfterFailedUpdate asks for contains them again, so the tree would
++  // stay empty. Dropping them keeps the rest of the tree.
++  AccessibilityNodeId root_id = GetRootAsAXNode()->id();
++  // A tree whose root is some other node was built from an update without the
++  // framework's root (see RequestFullSemanticsTree). Its root is wrong, so
++  // dropping node 0 as unreachable would keep it; leave such updates to fail
++  // and rebuild the tree.
++  if (root_id != ui::AXNode::kInvalidAXID && root_id != kFrameworkRootId) {
++    return;
++  }
++  if (root_id == ui::AXNode::kInvalidAXID) {
++    if (pending_semantics_node_updates_.find(kFrameworkRootId) ==
++        pending_semantics_node_updates_.end()) {
++      return;
++    }
++    root_id = kFrameworkRootId;
++  }
++
++  // Such nodes are new and listed by no parent. Look for those first, so
++  // that the usual update does not walk the whole tree.
++  std::unordered_set<AccessibilityNodeId> listed;
++  for (const auto& [id, node] : pending_semantics_node_updates_) {
++    listed.insert(node.children_in_traversal_order.begin(),
++                  node.children_in_traversal_order.end());
++  }
++  bool has_unlisted_new_node = false;
++  for (const auto& [id, node] : pending_semantics_node_updates_) {
++    if (id != root_id && listed.find(id) == listed.end() &&
++        !tree_->GetFromId(id)) {
++      has_unlisted_new_node = true;
++      break;
++    }
++  }
++  if (!has_unlisted_new_node) {
++    return;
++  }
++
++  // Walk the tree as it will be after the update: a pending node has its new
++  // children, any other node keeps its current ones.
++  std::unordered_set<AccessibilityNodeId> reached{root_id};
++  std::vector<AccessibilityNodeId> to_visit{root_id};
++  while (!to_visit.empty()) {
++    AccessibilityNodeId id = to_visit.back();
++    to_visit.pop_back();
++    const std::vector<int32_t>* children = nullptr;
++    auto pending = pending_semantics_node_updates_.find(id);
++    if (pending != pending_semantics_node_updates_.end()) {
++      children = &pending->second.children_in_traversal_order;
++    } else if (ui::AXNode* node = tree_->GetFromId(id)) {
++      children = &node->data().child_ids;
++    } else {
++      continue;
++    }
++    for (int32_t child : *children) {
++      if (reached.insert(child).second) {
++        to_visit.push_back(child);
++      }
++    }
++  }
++
++  std::vector<AccessibilityNodeId> dropped;
++  for (auto iter = pending_semantics_node_updates_.begin();
++       iter != pending_semantics_node_updates_.end();) {
++    if (reached.find(iter->first) == reached.end()) {
++      dropped.push_back(iter->first);
++      iter = pending_semantics_node_updates_.erase(iter);
++    } else {
++      ++iter;
++    }
++  }
++  std::sort(dropped.begin(), dropped.end());
++  std::string ids;
++  for (AccessibilityNodeId id : dropped) {
++    ids += (ids.empty() ? "" : ", ") + std::to_string(id);
++  }
++  FML_LOG(ERROR) << "Accessibility bridge dropped semantics nodes unreachable "
++                 << "from root " << root_id << ": " << ids;
++}
++
+ void AccessibilityBridge::ResetAfterFailedUpdate(const std::string& error) {
+   FML_LOG(ERROR) << "Accessibility bridge rebuilt after failed update: "
+                  << error;
+diff --git a/engine/src/flutter/shell/platform/common/accessibility_bridge.h b/engine/src/flutter/shell/platform/common/accessibility_bridge.h
+index fd79abc8..f6353322 100644
+--- a/engine/src/flutter/shell/platform/common/accessibility_bridge.h
++++ b/engine/src/flutter/shell/platform/common/accessibility_bridge.h
+@@ -80,6 +80,10 @@ class AccessibilityBridge
+   ///             should only call this method when both removal from A and
+   ///             addition to B are in the pending updates.
+   ///
++  ///             If the updates contain a new node that no node lists as a
++  ///             child, the updates for all nodes that cannot be reached from
++  ///             the root are dropped, so that the rest can be applied.
++  ///
+   ///             If the updates cannot be applied, the bridge discards its
+   ///             whole tree and all delegates, calls RequestFullSemanticsTree,
+   ///             and then ignores updates until one that contains the previous
+@@ -256,6 +260,12 @@ class AccessibilityBridge
+   // Calls RequestFullSemanticsTree unless it was called too recently.
+   void MaybeRequestFullSemanticsTree();
+ 
++  // If a pending node is new and listed by no parent, removes the pending node
++  // updates that cannot be reached from the root, which would make ui::AXTree
++  // reject the whole update. Does nothing unless the framework's root is the
++  // tree's root, or the tree is empty and the pending updates contain it.
++  void DropUnreachableNodes();
++
+   void GetSubTreeList(const SemanticsNode& target,
+                       std::vector<SemanticsNode>& result);
+   void ConvertFlutterUpdate(const SemanticsNode& node,
+diff --git a/engine/src/flutter/shell/platform/common/accessibility_bridge_unittests.cc b/engine/src/flutter/shell/platform/common/accessibility_bridge_unittests.cc
+index 4c9e70af..4afa9bad 100644
+--- a/engine/src/flutter/shell/platform/common/accessibility_bridge_unittests.cc
++++ b/engine/src/flutter/shell/platform/common/accessibility_bridge_unittests.cc
+@@ -967,5 +967,184 @@ TEST(AccessibilityBridgeTest, AppliesNextUpdateIfFullTreeCannotBeRequested) {
+   EXPECT_EQ(bridge->full_tree_requests, 1);
+ }
+ 
++// The first tree contains nodes that no node lists: node 3, and node 4 with its
++// child 5, as the framework sends for an OverlayPortal anchor that was merged
++// into its parent. They are dropped and the rest of the tree is applied.
++TEST(AccessibilityBridgeTest, DropsUnreachableNodesFromCompleteTree) {
++  fml::testing::LogCapture log_capture;
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++
++  std::vector<int32_t> node0_children{1, 2};
++  std::vector<int32_t> node4_children{5};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(0, "node 0", &node0_children));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(1, "node 1"));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(2, "node 2"));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(3, "node 3"));
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(4, "node 4", &node4_children));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(5, "node 5"));
++  bridge->CommitUpdates();
++
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), 0);
++  auto root = bridge->GetFlutterPlatformNodeDelegateFromID(0).lock();
++  ASSERT_TRUE(root);
++  EXPECT_EQ(root->GetChildCount(), 2);
++  EXPECT_FALSE(bridge->GetFlutterPlatformNodeDelegateFromID(1).expired());
++  EXPECT_FALSE(bridge->GetFlutterPlatformNodeDelegateFromID(2).expired());
++  for (int32_t id = 3; id <= 5; id++) {
++    EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(id).expired())
++        << "node " << id;
++  }
++  EXPECT_EQ(bridge->full_tree_requests, 0);
++  EXPECT_EQ(log_capture.str().find("rebuilt after failed update"),
++            std::string::npos)
++      << log_capture.str();
++  EXPECT_NE(log_capture.str().find("dropped semantics nodes unreachable from "
++                                   "root 0: 3, 4, 5"),
++            std::string::npos)
++      << log_capture.str();
++}
++
++// An update that changes node 2 also sends node 7 with its child 8, which no
++// node lists, as the framework does for overlay content grafted onto an anchor
++// that it does not send. Node 2 is updated and nodes 7 and 8 are dropped.
++TEST(AccessibilityBridgeTest, DropsUnreachableSubtreeFromUpdate) {
++  fml::testing::LogCapture log_capture;
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  PopulateReparentingTree(*bridge);
++
++  std::vector<int32_t> node7_children{8};
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(2, "node 2 new"));
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(7, "node 7", &node7_children));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(8, "node 8"));
++  bridge->CommitUpdates();
++
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), 0);
++  auto node2 = bridge->GetFlutterPlatformNodeDelegateFromID(2).lock();
++  ASSERT_TRUE(node2);
++  EXPECT_EQ(node2->GetName(), "node 2 new");
++  for (int32_t id = 0; id <= 6; id++) {
++    EXPECT_FALSE(bridge->GetFlutterPlatformNodeDelegateFromID(id).expired())
++        << "node " << id;
++  }
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(7).expired());
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(8).expired());
++  EXPECT_EQ(bridge->full_tree_requests, 0);
++  EXPECT_EQ(log_capture.str().find("rebuilt after failed update"),
++            std::string::npos)
++      << log_capture.str();
++}
++
++// Unreachable nodes 9 and 10 come in the same commit as node 5 gaining a new
++// child 7 and node 3 moving from node 1 to node 2. Reachability follows the
++// pending children, so the structure changes are kept.
++TEST(AccessibilityBridgeTest, DropsUnreachableNodesAlongsideStructureChanges) {
++  fml::testing::LogCapture log_capture;
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  PopulateReparentingTree(*bridge);
++
++  std::vector<int32_t> node5_children{6, 7};
++  std::vector<int32_t> node2_children{3};
++  std::vector<int32_t> node3_children{4};
++  std::vector<int32_t> node9_children{10};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(5, "node 5", &node5_children));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(7, "node 7"));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(1, "node 1"));
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(2, "node 2", &node2_children));
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(3, "node 3", &node3_children));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(4, "node 4"));
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(9, "node 9", &node9_children));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(10, "node 10"));
++  bridge->CommitUpdates();
++
++  EXPECT_EQ(bridge->full_tree_requests, 0);
++  auto node3 = bridge->GetFlutterPlatformNodeDelegateFromID(3).lock();
++  auto node4 = bridge->GetFlutterPlatformNodeDelegateFromID(4).lock();
++  auto node7 = bridge->GetFlutterPlatformNodeDelegateFromID(7).lock();
++  ASSERT_TRUE(node3);
++  ASSERT_TRUE(node4);
++  ASSERT_TRUE(node7);
++  EXPECT_EQ(node7->GetAXNode()->parent()->id(), 5);
++  EXPECT_EQ(node3->GetAXNode()->parent()->id(), 2);
++  EXPECT_EQ(node4->GetAXNode()->parent()->id(), 3);
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(9).expired());
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(10).expired());
++  EXPECT_NE(log_capture.str().find("root 0: 9, 10"), std::string::npos)
++      << log_capture.str();
++}
++
++// Every pending node is unreachable, so nothing is left to apply.
++TEST(AccessibilityBridgeTest, DropsUpdateWithOnlyUnreachableNodes) {
++  fml::testing::LogCapture log_capture;
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  PopulateReparentingTree(*bridge);
++
++  std::vector<int32_t> node7_children{8};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(7, "node 7", &node7_children));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(8, "node 8"));
++  bridge->CommitUpdates();
++
++  EXPECT_EQ(log_capture.str().find("rebuilt after failed update"),
++            std::string::npos)
++      << log_capture.str();
++  EXPECT_EQ(bridge->full_tree_requests, 0);
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), 0);
++  for (int32_t id = 0; id <= 6; id++) {
++    EXPECT_FALSE(bridge->GetFlutterPlatformNodeDelegateFromID(id).expired())
++        << "node " << id;
++  }
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(7).expired());
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(8).expired());
++}
++
++// While the bridge waits for the complete tree after a failed update, the
++// framework sends one that contains a node that no node lists. The bridge
++// drops that node and stops waiting.
++TEST(AccessibilityBridgeTest, RecoversFromCompleteTreeWithUnreachableNode) {
++  std::shared_ptr<TestAccessibilityBridge> bridge =
++      std::make_shared<TestAccessibilityBridge>();
++  bridge->SetFullTreeRequestIntervalForTesting(fml::TimeDelta::FromSeconds(60));
++  PopulateReparentingTree(*bridge);
++
++  std::vector<int32_t> node2_children{7};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(2, "node 2", &node2_children));
++  bridge->CommitUpdates();
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), ui::AXNode::kInvalidAXID);
++
++  std::vector<int32_t> node0_children{1, 2, 5};
++  bridge->AddFlutterSemanticsNodeUpdate(
++      CreateSemanticsNode(0, "node 0", &node0_children));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(1, "node 1"));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(2, "node 2"));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(5, "node 5"));
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(9, "node 9"));
++  bridge->CommitUpdates();
++
++  EXPECT_EQ(bridge->GetRootAsAXNode()->id(), 0);
++  EXPECT_FALSE(bridge->GetFlutterPlatformNodeDelegateFromID(5).expired());
++  EXPECT_TRUE(bridge->GetFlutterPlatformNodeDelegateFromID(9).expired());
++  EXPECT_EQ(bridge->full_tree_requests, 1);
++
++  // The wait is over: an update without the root is applied.
++  bridge->AddFlutterSemanticsNodeUpdate(CreateSemanticsNode(1, "node 1 new"));
++  bridge->CommitUpdates();
++  auto node1 = bridge->GetFlutterPlatformNodeDelegateFromID(1).lock();
++  ASSERT_TRUE(node1);
++  EXPECT_EQ(node1->GetName(), "node 1 new");
++}
++
+ }  // namespace testing
+ }  // namespace flutter

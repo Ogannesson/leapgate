@@ -77,6 +77,7 @@
 - 2026-10-22 · 不支持 Windows 7，只支持 Windows 10 及以上；构建链因此不必照搬上游为 Win7 钉的旧版 Flutter、Rust 1.75 和自编引擎。
 - 2026-10-22 · 第二期编上游现有界面的 Flutter 路线按 B → C → A 依次试：B 官方 Flutter 3.44.9 + 上游源码补丁脚本；C 自编 3.44.9 引擎只打多窗口崩溃那一处补丁；A 照搬上游 x64 的 3.24.5 + 自编引擎（`docs/research/第二期客户端/03`）。Windows 客户端只能在 Windows 上构建，在维护者本机做。
 - 2026-10-26 · Flutter 路线改走 C（维护者定）：官方 3.44.9 引擎的无障碍桥有 use-after-free（语义树更新中途失败后委托指着已释放节点，任何无障碍客户端查询就会让控制端整个进程崩，上游未修），所以自编 3.44.9 引擎打两份补丁：无障碍桥在更新失败后重建、委托按 id 现取；flutter#155685 的 `ClearCurrent` → `MakeCurrent`。只改 C++、只替换 SDK 缓存里 release 的 `flutter_windows.dll`，Dart、`gen_snapshot`、框架不动；补丁和 `build-engine.ps1` 在 `scripts/windows/`，`build-client.ps1` 核对缓存里的引擎是当前补丁编的。不改 Dart 侧（不包 ExcludeSemantics）、不拦 WM_GETOBJECT（会让辅助功能全部失效）。
+- 2026-10-31 · 路线 C 加第三份补丁 0003（维护者选修法 ①）：3.44.9 框架会发出孤儿语义节点，AXTree 整份拒收，0001 重建以后拿到的完整树里还有它，新界面的语义树因此一直是空的。0003 让无障碍桥在提交前丢掉从根 0 走不到的待提交节点，只改公共桥的 C++。根因、三类触发、验证结果都在 `docs/新界面/无障碍语义树为空排查.md`。端到端脚本要用原生 COM 的 IUIAutomation：托管的 System.Windows.Automation 看不到 Flutter 的树。
 - 2026-10-22 · 品牌：主界面的"Powered by RustDesk"用内置选项隐藏，关于页保留上游版权行并注明"基于 RustDesk"；`librustdesk.dll` 改名为 `libleapgate.dll`（接受每次合并上游多几处冲突）。
 - 2026-10-23 · 第三期设计（依据 `docs/research/第三期/01~03`）：
   - Leapgate 客户端的心跳、sysinfo、审计改走新路径 `/api/leapgate/v1/`，客户端在上游代码里只加 2 处挂钩，原版客户端照走旧接口。
