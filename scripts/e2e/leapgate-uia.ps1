@@ -205,8 +205,9 @@ public static class Com {
 # The main window and its FLUTTERVIEW child, found without UI Automation.
 function Get-Windows {
     $exe = [IO.Path]::GetFullPath((Join-Path $Dir 'leapgate.exe'))
+    # The portable single-file exe runs as ...\leapgate\.\leapgate.exe
     $pids = @(Get-Process -Name leapgate -ErrorAction SilentlyContinue |
-            Where-Object { $_.Path -and [string]::Equals($_.Path, $exe, [StringComparison]::OrdinalIgnoreCase) } |
+            Where-Object { $_.Path -and [string]::Equals([IO.Path]::GetFullPath($_.Path), $exe, [StringComparison]::OrdinalIgnoreCase) } |
             ForEach-Object Id)
     if (-not $pids.Count) { throw "no process runs $exe" }
     $found = [Collections.Generic.List[IntPtr]]::new()

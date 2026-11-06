@@ -50,7 +50,9 @@ public delegate bool EnumProc(System.IntPtr h, System.IntPtr l);
 }
 [void][LeapgatePost.Win]::SetProcessDPIAware()
 $exe = [IO.Path]::GetFullPath((Join-Path $Dir 'leapgate.exe'))
-$pids = @(Get-Process leapgate -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | ForEach-Object Id)
+# The portable single-file exe runs as ...\leapgate\.\leapgate.exe
+$pids = @(Get-Process leapgate -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and [IO.Path]::GetFullPath($_.Path) -eq $exe } | ForEach-Object Id)
 if (-not $pids.Count) { throw "no process runs $exe" }
 $script:top = [IntPtr]::Zero
 [void][LeapgatePost.Win]::EnumWindows([LeapgatePost.Win+EnumProc] {
