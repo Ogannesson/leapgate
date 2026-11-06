@@ -17,12 +17,14 @@ Implemented:
 - Direct LAN connections while a TUN-mode proxy is running on either side. The controlled side reports the addresses of its physical network adapters and the controlling side tries them in parallel. This applies when both ends reach the server from the same public address (the proxy sends rendezvous traffic out directly rather than through a remote exit) and both ends run Leapgate. End-to-end testing of this feature is not finished.
 - Signed device reports. Leapgate clients sign heartbeat, system-info and audit requests with the device key, the server pins that key on first use, and the server signs its responses.
 - TCP key exchange on the rendezvous port and forwarding of IPv6 hole-punching addresses, both missing from the open-source hbbs.
+- Leapgate's own ICE-style NAT traversal. Both sides gather candidate addresses on their physical network adapters, including the public mapping the Leapgate server sees, exchange them through the server (the offer forwarded to the controlled side is signed and encrypted), check candidate pairs with STUN, and run the existing KCP transport over the selected pair. It races the upstream connection path and is used only between two Leapgate clients on a Leapgate server. End-to-end acceptance is not finished.
+- Exit Node, at the application level. Once the controlled device turns on "Allow as exit node", the controlling side gets a local SOCKS5 and HTTP CONNECT proxy on 127.0.0.1, and TCP connections made through it leave from the controlled device's physical network adapter. The controlled side refuses its own LAN and local addresses by default, and only TCP is supported. The server lists exit devices only to their owners and to users granted access. Part of the acceptance testing is not finished.
+- A redesigned client UI, a separate Flutter project that replaces upstream's UI in released builds. It covers the home window, remote sessions, the connection manager on the controlled side, accounts and address books, the exit page, settings and file transfer.
 
 Planned, not implemented:
 
-- Exit Node: using a controlled device as an application-level exit (SOCKS5 and HTTP CONNECT, TCP only).
-- A redesigned client UI.
-- Leapgate's own ICE-style NAT traversal (currently being designed).
+- TCP tunnels (port forwarding and RDP), the terminal, the camera viewer and an install page in the new UI. Until then, upstream's UI can still be built as a portable copy for the first three.
+- Android and iOS controlling clients, after the desktop UI.
 
 ### Repository layout
 
@@ -63,12 +65,14 @@ Leapgate（跃门）是基于 [RustDesk](https://github.com/rustdesk/rustdesk) �
 - 任一端开着 TUN 模式的代理时也能局域网直连。被控端上报自己物理网卡的地址，控制端并发尝试。前提是两端到服务端的公网地址相同（代理对会合服务器的流量走直连、不经远端出口），且两端都是 Leapgate 客户端。这项功能的端到端测试还没做完。
 - 设备签名上报。Leapgate 客户端用设备私钥给心跳、系统信息和审计请求签名，服务端首次验签通过后锁定这把公钥，并给自己的响应签名。
 - 会合端口上的 TCP 密钥交换和 IPv6 打洞地址转发，这两项开源版 hbbs 都没有。
+- Leapgate 自研的 ICE 式 NAT 穿透。两端在物理网卡上收集候选地址（包括 Leapgate 服务端看到的公网映射地址），经服务端交换（转给被控端的那份既签名又加密），用 STUN 逐对检查，选中一对后在上面跑原有的 KCP 传输。它和上游原有的连接路径竞速，只在两端都是 Leapgate 客户端、服务端是 leapgate-server 时使用。端到端验收还没做完。
+- 应用层出口（Exit Node）。被控端打开"允许作为出口"后，控制端在本机 127.0.0.1 上开一个 SOCKS5 和 HTTP CONNECT 代理，经它发出的 TCP 连接从被控端的物理网卡出去。被控端默认拒绝访问自己的局域网和本机地址，只支持 TCP。服务端只把开着出口的设备列给设备主人和被授权的用户。还有一部分验收没做完。
+- 重新设计的客户端界面。它是独立的 Flutter 工程，在发布的构建里替换了上游界面，包括主窗口、远程会话、被控端的连接管理小窗、账号和地址簿、出口页、设置和文件传输。
 
 计划中，尚未实现：
 
-- Exit Node：把被控端当作应用层出口（SOCKS5 和 HTTP CONNECT，只支持 TCP）。
-- 重新设计的客户端界面。
-- Leapgate 自研的 ICE 式 NAT 穿透（正在设计）。
+- 新界面里的 TCP 隧道（端口转发和 RDP）、终端、摄像头查看和安装页。补上之前，仍可以把上游界面编成便携版来用前三项。
+- Android 和 iOS 控制端，排在桌面新界面之后。
 
 ### 仓库结构
 
