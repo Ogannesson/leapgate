@@ -6,7 +6,8 @@
 .DESCRIPTION
   装到 -BuildRoot（默认 $env:LEAPGATE_BUILD_ROOT，再默认 C:\leapgate-build）：
     Rust 工具链（rustup，钉版本）、LLVM（解压安装包，不用管理员）、Flutter SDK、vcpkg（钉提交）、
-    flutter_rust_bridge_codegen 和 cargo-expand（cargo install 到构建目录）。
+    flutter_rust_bridge_codegen 和 cargo-expand（cargo install 到构建目录）、便携打包要的 Python brotli
+    （pip install --user）。
   需要管理员权限的系统准备（VS 2022 Build Tools、开发者模式、长路径）只检查，不做；缺了就报出来退出。
   事先要有：rustup、Git for Windows、Python 3.10+；解压 LLVM 安装包要 7-Zip 或 Bandizip。
 
@@ -126,6 +127,10 @@ function Install-CargoTool {
 }
 Install-CargoTool cargo-expand cargo-expand.exe $LeapgatePins.CargoExpand
 Install-CargoTool flutter_rust_bridge_codegen flutter_rust_bridge_codegen.exe $LeapgatePins.FrbCodegen @('--features', 'uuid')
+
+# ---- 7. 便携打包（libs\portable\generate.py 用 brotli 压缩发布目录）----
+& python.exe -c 'import brotli' 2>$null
+if ($LASTEXITCODE -ne 0) { Invoke-Logged $log python.exe @('-m', 'pip', 'install', '--user', 'brotli') }
 
 Invoke-Logged $log flutter.bat @('doctor', '-v')
 Write-Host "工具链就绪：$($L.Root)（日志 $log）" -ForegroundColor Green

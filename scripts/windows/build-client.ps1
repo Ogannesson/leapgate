@@ -1,9 +1,10 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-  编译 Leapgate Windows 客户端（Flutter 版，x64）。-Ui upstream（默认）编上游界面 flutter\，产物
-  （leapgate.exe、libleapgate.dll 等）留在源码目录的 flutter\build\windows\x64\runner\Release\；
-  -Ui leapgate 编新界面 leapgate_ui\app\，产物在 leapgate_ui\app\build\windows\x64\runner\Release\。
+  编译 Leapgate Windows 客户端（Flutter 版，x64）。-Ui leapgate（默认，M8 起发布的界面）编新界面
+  leapgate_ui\app\，产物在 leapgate_ui\app\build\windows\x64\runner\Release\，旁边（runner\）另有便携
+  单文件 leapgate-<版本>-x86_64.exe 和发布目录的 zip leapgate-<版本>-x86_64.zip；-Ui upstream 编上游
+  界面 flutter\（旧界面便携版），产物（leapgate.exe、libleapgate.dll 等）留在 flutter\build\windows\x64\runner\Release\。
 
 .DESCRIPTION
   先跑 setup-toolchain.ps1。步骤（-Steps 可只跑其中几步，默认全跑）：
@@ -13,16 +14,22 @@
     bridge  生成 flutter_rust_bridge 桥接代码，两块：flutter_ffi.rs 和 leapgate_ffi.rs
             （缺文件或两个 ffi 文件更新过才生成，-ForceBridge 强制）
     build   之前核对 SDK 缓存里的引擎是 build-engine.ps1 -Install 用当前补丁装的自编版，不是就停下。
+            先刷新 build.rs 的修改时间，让根 crate 的 build.rs 重跑、构建时间（BUILD_DATE）是这一次的：
+            主页"升级"卡比的就是它（docs/新界面/11-M8拆法.md §4.4），build.rs 自己只在文件改过时重跑。
             -Ui upstream：python build.py --portable --flutter --skip-portable-pack --hwcodec [--vram]
             -Ui leapgate（docs/新界面/03-实施方案.md §1.7）：先在 core、app 各 pub get，两个 pubspec.lock
             和提交里的不一样就中止（入库的锁文件要和 pubspec.yaml 一致）；cargo 特性向
             build.py --print-features 要，和上游界面同一组；cargo 编 librustdesk.dll 和虚拟显示的 dylib；
-            在 leapgate_ui\app 里 flutter build windows，--build-name 是 libs\leapgate 的版本
+            在 leapgate_ui\app 里 flutter build windows，--build-name 是 libs\leapgate 的版本；产物核对过后
+            用 libs\portable\generate.py 打便携单文件（要 Python 的 brotli，setup-toolchain.ps1 装），再把
+            发布目录打成 zip。便携包名不带 install：名字以 install.exe 结尾会被当成安装页（M8-2）
+  开头打印默认服务器有没有注入（LEAPGATE_RENDEZVOUS_SERVER、LEAPGATE_RS_PUB_KEY、LEAPGATE_API_SERVER，
+  编译时读的环境变量）。
   patch、bridge、build 会改动 -Source 里被跟踪的文件（common.dart、pubspec.yaml、pubspec.lock），
   所以 -Source 应该是专门用来构建的 worktree，改动不要提交。
 
   -FlutterRoot 换一套 Flutter SDK（PATH 和引擎核对都按它），给新界面每个里程碑的最新 stable 检查用
-  （03 §8.8），只配 -Ui leapgate 用（脚本不拦，配 -Ui upstream 的结果没有意义）：那套是官方引擎，要配 -AllowOfficialEngine；它钉的基础包和 3.44.9 不同，pub get 会改
+  （03 §8.8），只配新界面用（脚本不拦，配 -Ui upstream 的结果没有意义）：那套是官方引擎，要配 -AllowOfficialEngine；它钉的基础包和 3.44.9 不同，pub get 会改
   两个 pubspec.lock，所以这时不查锁文件改动，检查完在构建 worktree 里还原它们。
 
 .EXAMPLE
@@ -38,8 +45,8 @@ param(
     [Parameter(Mandatory)][string]$Source,
     [string]$BuildRoot,
     [ValidateSet('vcpkg', 'patch', 'bridge', 'build')][string[]]$Steps = @('vcpkg', 'patch', 'bridge', 'build'),
-    # 编哪个界面：upstream 是上游的 flutter\，leapgate 是新界面 leapgate_ui\（docs/新界面/03-实施方案.md §1.7）
-    [ValidateSet('upstream', 'leapgate')][string]$Ui = 'upstream',
+    # 编哪个界面：leapgate 是新界面 leapgate_ui\（docs/新界面/03-实施方案.md §1.7），upstream 是上游的 flutter\
+    [ValidateSet('upstream', 'leapgate')][string]$Ui = 'leapgate',
     [switch]$ForceBridge,
     # 关掉 D3D11 纹理零拷贝上屏（vram 特性），退回软件上屏
     [switch]$NoVram,
@@ -56,6 +63,14 @@ $Source = (Resolve-Path $Source).Path
 New-Item -ItemType Directory -Force $L.Logs | Out-Null
 $stamp = Get-Date -Format yyyyMMdd-HHmmss
 $tools = Set-LeapgateBuildEnv $L
+# 默认服务器在编译时注入（M8-4：这一版不注入），只说有没有、不打印值
+$injected = 'LEAPGATE_RENDEZVOUS_SERVER', 'LEAPGATE_RS_PUB_KEY', 'LEAPGATE_API_SERVER' |
+    Where-Object { [Environment]::GetEnvironmentVariable($_) }
+Write-Host $(if ($injected) { "注入了默认服务器：$($injected -join '、')" } else { '未注入默认服务器' })
+if ('build' -in $Steps -and $Ui -eq 'leapgate') {
+    & python.exe -c 'import brotli'
+    if ($LASTEXITCODE -ne 0) { throw '便携打包要 Python 的 brotli：先跑 setup-toolchain.ps1' }
+}
 Push-Location $Source
 try {
     # ---- vcpkg ----
@@ -149,6 +164,9 @@ try {
         $trim = "/d1trimfile:$cargoHome\ /d1trimfile:$Source\"
         $env:CFLAGS_x86_64_pc_windows_msvc = $trim
         $env:CXXFLAGS_x86_64_pc_windows_msvc = $trim
+        # 构建时间（src\version.rs 的 BUILD_DATE）由根 crate 的 build.rs 写，它只在 build.rs、Cargo.toml、
+        # windows.cc 改过时重跑；只改修改时间，内容不动
+        (Get-Item build.rs).LastWriteTime = Get-Date
         # crate 仍叫 librustdesk，Flutter 的 CMake 拷贝时改名为 libleapgate.dll
         $expected = 'leapgate.exe', 'libleapgate.dll', 'flutter_windows.dll', 'data\app.so'
         if ($Ui -eq 'leapgate') {
@@ -191,6 +209,24 @@ try {
         if ($engineHash -and
             (Get-FileHash (Join-Path $out 'flutter_windows.dll') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $engineHash) {
             throw "产物里的 flutter_windows.dll 不是缓存里的自编引擎：$out"
+        }
+        if ($Ui -eq 'leapgate') {
+            # 便携单文件（M8-2）：照 build.py 的 build_flutter_windows 调 generate.py，它把发布目录压进
+            # data.bin，再在工作区里编 rustdesk-portable-packer。包名不带 install（以 install.exe
+            # 结尾会被当成安装页）；再把发布目录打一个 zip（M8-3）。两个都放在发布目录旁边
+            Push-Location libs\portable
+            try {
+                Invoke-Logged $log python.exe @('generate.py', '-f', $out, '-o', '.', '-e', (Join-Path $out 'leapgate.exe'))
+            } finally { Pop-Location }
+            $packages = Split-Path $out
+            $portable = Join-Path $packages "leapgate-$version-x86_64.exe"
+            Move-Item -Force target\release\rustdesk-portable-packer.exe $portable
+            $zip = Join-Path $packages "leapgate-$version-x86_64.zip"
+            Compress-Archive -Path "$out\*" -DestinationPath $zip -Force
+            foreach ($f in $portable, $zip) {
+                if (-not (Test-Path $f)) { throw "产物缺少 $f" }
+            }
+            Write-Host "便携单文件：$portable`n发布目录的 zip：$zip" -ForegroundColor Green
         }
         # pubspec.yaml 随上游合并会变；pub get 改写了锁文件就说明钉住的那份要更新
         if ($Ui -ne 'leapgate' -and (Get-FileHash flutter\pubspec.lock).Hash -ne (Get-FileHash $pinnedLock).Hash) {
