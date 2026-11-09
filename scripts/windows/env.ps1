@@ -28,9 +28,9 @@ $LeapgatePins = @{
     FrbCodegen    = '1.80.1'
     CargoExpand   = '1.0.95'
     # build-client.ps1 -PrinterDriver 下载的打印机驱动和适配器（rustdesk/hbb_common 的 driver 发布）；
-    # 第一次下载时由主会话按实测填。空着时退回同一发布里 sha256sums 的核对
-    PrinterDriverSha256  = ''
-    PrinterAdapterSha256 = ''
+    # 2026-11-09 第一次下载时按实测填（当时和同一发布里的 sha256sums 一致）。空着时退回 sha256sums 的核对
+    PrinterDriverSha256  = 'c4cf4d3b48c4d9079b243edc43bb1db03b076282bc259c9f49883e9db20fa8b5'
+    PrinterAdapterSha256 = 'e90e5d52c8807b4c6293c78a52479338715e0bf396b1b34802777b8c452e6781'
 }
 
 function Get-LeapgateLayout {
