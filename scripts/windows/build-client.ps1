@@ -214,37 +214,51 @@ try {
             throw "产物里的 flutter_windows.dll 不是缓存里的自编引擎：$out"
         }
         # 打印机驱动（M9-4、R3-Q23）：照上游 CI（.github/workflows/flutter-build.yml 的 Build rustdesk 一步）
-        # 从 rustdesk/hbb_common 的 driver 发布下载驱动、适配器和同一发布里的 sha256sums，两个 zip 按它核对；
-        # 驱动解到 drivers\RustDeskPrinterDriver（libs/remote_printer 按这个路径找 inf），适配器 dll 放程序旁。
-        # 上游核对不符时跳过、照常出包，这里直接停下。在打便携包之前放进去，便携单文件里也有。
-        # 默认不下载：没有它时设置"远程打印"的"安装"报 inf 不存在
+        # 从 rustdesk/hbb_common 的 driver 发布下载驱动和适配器。两个 zip 按 env.ps1 钉住的 sha256 核对，
+        # 不符就停下（上游换了文件）；还没钉的退回同一发布里的 sha256sums（上游 CI 的做法），并打印算出的
+        # 哈希供钉住。上游核对不符时跳过、照常出包，这里直接停下。驱动解到 drivers\RustDeskPrinterDriver
+        # （libs/remote_printer 按这个路径找 inf），适配器 dll 放程序旁；在打便携包之前放进去，便携单文件里
+        # 也有。默认不下载：没有它时设置"远程打印"的"安装"报 inf 不存在，上一次带开关放进产物的也删掉
+        $driverDir = Join-Path $out 'drivers\RustDeskPrinterDriver'
+        $adapterDll = Join-Path $out 'printer_driver_adapter.dll'
         if ($PrinterDriver) {
             $release = 'https://github.com/rustdesk/hbb_common/releases/download/driver'
             $driverZip, $adapterZip = 'rustdesk_printer_driver_v4-1.4.zip', 'printer_driver_adapter.zip'
+            $pins = @{ $driverZip = $LeapgatePins.PrinterDriverSha256; $adapterZip = $LeapgatePins.PrinterAdapterSha256 }
             $dl = Join-Path $L.Downloads 'printer-driver'
             Remove-Item -Recurse -Force $dl -ErrorAction SilentlyContinue
             New-Item -ItemType Directory -Force $dl | Out-Null
-            foreach ($f in $driverZip, $adapterZip, 'sha256sums') {
+            foreach ($f in @($driverZip, $adapterZip) + @(if ($pins.Values -contains '') { 'sha256sums' })) {
                 Invoke-Logged $log curl.exe @('-fL', '--retry', '3', '-o', (Join-Path $dl $f), "$release/$f")
             }
-            $sums = Get-Content (Join-Path $dl 'sha256sums')
             foreach ($f in $driverZip, $adapterZip) {
+                $actual = (Get-FileHash (Join-Path $dl $f) -Algorithm SHA256).Hash
+                if ($pins[$f]) {
+                    if ($actual -ne $pins[$f]) {
+                        throw "上游换了文件：$f 和 env.ps1 钉住的 sha256 不符`n  钉住 $($pins[$f])`n  实际 $actual"
+                    }
+                    continue
+                }
+                $sums = Get-Content (Join-Path $dl 'sha256sums')
                 $line = $sums | Where-Object { $_ -match "^([a-fA-F0-9]{64}) \*$([regex]::Escape($f))$" } | Select-Object -First 1
                 if (-not $line) { throw "sha256sums 里没有 $f" }
                 $expectedSum = ($line -split ' ')[0]
-                $actual = (Get-FileHash (Join-Path $dl $f) -Algorithm SHA256).Hash
                 if ($actual -ne $expectedSum) { throw "sha256 不符：$f`n  期望 $expectedSum`n  实际 $actual" }
+                Write-Host "$f 的 sha256 还没钉住，按 sha256sums 核对通过：$($actual.ToLowerInvariant())" -ForegroundColor Yellow
             }
             Expand-Archive (Join-Path $dl $driverZip) -DestinationPath $dl -Force
             Expand-Archive (Join-Path $dl $adapterZip) -DestinationPath $dl -Force
-            $drivers = Join-Path $out 'drivers'
-            New-Item -ItemType Directory -Force $drivers | Out-Null
-            Remove-Item -Recurse -Force (Join-Path $drivers 'RustDeskPrinterDriver') -ErrorAction SilentlyContinue
-            Move-Item (Join-Path $dl 'rustdesk_printer_driver_v4-1.4') (Join-Path $drivers 'RustDeskPrinterDriver')
+            New-Item -ItemType Directory -Force (Split-Path $driverDir) | Out-Null
+            Remove-Item -Recurse -Force $driverDir -ErrorAction SilentlyContinue
+            Move-Item (Join-Path $dl 'rustdesk_printer_driver_v4-1.4') $driverDir
             Copy-Item -Force (Join-Path $dl 'printer_driver_adapter.dll') $out
-            foreach ($f in 'drivers\RustDeskPrinterDriver\RustDeskPrinterDriver.inf', 'printer_driver_adapter.dll') {
-                if (-not (Test-Path (Join-Path $out $f))) { throw "产物缺少 $f：$out" }
+            foreach ($f in (Join-Path $driverDir 'RustDeskPrinterDriver.inf'), $adapterDll) {
+                if (-not (Test-Path $f)) { throw "产物缺少 $f" }
             }
+        } else {
+            Remove-Item -Recurse -Force $driverDir, $adapterDll -ErrorAction SilentlyContinue
+            $drivers = Split-Path $driverDir
+            if ((Test-Path $drivers) -and -not (Get-ChildItem $drivers)) { Remove-Item $drivers }
         }
         if ($Ui -eq 'leapgate') {
             # 便携单文件（M8-2）：照 build.py 的 build_flutter_windows 调 generate.py，它把发布目录压进
