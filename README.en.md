@@ -8,6 +8,7 @@
 
 <p>
 <a href="#highlights">Highlights</a> ·
+<a href="#preview">Screens</a> ·
 <a href="#features">Features</a> ·
 <a href="#architecture">Architecture</a> ·
 <a href="#build-from-source">Try it from source</a> ·
@@ -26,7 +27,11 @@
 
 </div>
 
-<!-- UI preview: add screenshots here once there are some that can be published -->
+<p align="center">
+<img src="docs/assets/ui/home-light.png" width="800" alt="Leapgate main window: your ID, one-time password and navigation on the left; the connection box and recent devices on the right">
+<br>
+<sub>Main window (design mockup with made-up devices and names, in Chinese)</sub>
+</p>
 
 <a id="highlights"></a>
 
@@ -67,6 +72,45 @@ A separate Flutter project with one main window and in-app tabs. It covers the h
 
 > [!WARNING]
 > Leapgate is in early development. There is no release and no installer; the only way to try it is to build from source. Only Windows 10 and later is supported for now, on both the controlling and the controlled side, and builds are not code-signed. It is not ready for production use. The design documents and implementation notes are in Chinese only.
+
+<a id="preview"></a>
+
+## Screens
+
+The new UI has a compact and a detailed density, light and dark themes, and comes in Simplified Chinese and English. The pictures below are its design mockups, drawn in Chinese with made-up devices, names and data. Before each milestone is merged, the implemented UI is checked against these mockups for appearance.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/session.png" alt="Remote session: session tabs at the top; the floating toolbar shows that this connection goes through a relay">
+<br><b>Remote session</b>: several sessions as tabs in one window; the floating toolbar shows whether the connection is direct or relayed.
+</td>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/file-transfer.png" alt="File transfer: local and remote panes at the top, the transfer queue expanded below">
+<br><b>File transfer</b>: local and remote panes; queued jobs can be paused, resumed and retried from where they failed, and individual files can be skipped.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/exit.png" alt="Exit page: one exit card in use, with the list of available exits below">
+<br><b>Exit node</b>: pick a device that allows itself as an exit, then point an app at the local SOCKS5 or HTTP proxy address.
+</td>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/settings.png" alt="Settings: groups for incoming connections, outgoing connections and general on the left; access and passwords on the right">
+<br><b>Settings</b>: grouped into incoming connections, outgoing connections and general, with search.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/home-dark.png" alt="The main window in the dark theme">
+<br><b>Dark theme</b>
+</td>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/cm.png" alt="The connection manager on the controlled side, light and dark">
+<br><b>Connection manager on the controlled side</b>: shows who is connected, lets you take back keyboard and mouse, clipboard and other permissions at any time, or disconnect.
+</td>
+</tr>
+</table>
 
 ## About
 

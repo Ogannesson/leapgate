@@ -8,6 +8,7 @@
 
 <p>
 <a href="#highlights">亮点</a> ·
+<a href="#preview">界面预览</a> ·
 <a href="#features">功能</a> ·
 <a href="#architecture">架构</a> ·
 <a href="#build-from-source">从源码构建试用</a> ·
@@ -26,7 +27,11 @@
 
 </div>
 
-<!-- 界面预览：有可公开的截图后在这里加 -->
+<p align="center">
+<img src="docs/assets/ui/home-light.png" width="800" alt="Leapgate 主窗口：左栏是本机 ID、一次性密码和导航，右侧是连接框和最近连接过的设备">
+<br>
+<sub>主窗口（设计稿，设备和人名都是虚构的）</sub>
+</p>
 
 <a id="highlights"></a>
 
@@ -67,6 +72,45 @@
 
 > [!WARNING]
 > Leapgate 处在早期开发阶段，没有发布，也没有可下载的安装包，想试用只能从源码构建。目前只支持 Windows 10 及以上（控制端和被控端），构建产物没有代码签名。不建议用于生产环境。设计文档和实施说明只有中文。
+
+<a id="preview"></a>
+
+## 界面预览
+
+新界面有简洁和详细两种显示密度、浅色和深色两套主题，界面语言有简体中文和英文。下面是它的设计稿，图里的设备、人名和数据都是虚构的。每个里程碑合入前，都会拿实现出来的界面对照设计稿做一轮外观检查。
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/session.png" alt="远程会话：顶部是会话标签，浮动工具栏上标着这条连接经中继">
+<br><b>远程会话</b>：一个窗口里用标签切换多个会话，浮动工具栏上标着这条连接是直连还是经中继。
+</td>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/file-transfer.png" alt="文件传输：上面是本机和远程设备两栏，下面是展开的传输队列">
+<br><b>文件传输</b>：本机和远程设备两栏；传输队列里的任务可以暂停、继续、从失败处重试，也可以跳过个别文件。
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/exit.png" alt="出口页：一张正在使用的出口卡片，下面是可用的出口列表">
+<br><b>应用出口</b>：选一台允许作为出口的设备，把本机的 SOCKS5 或 HTTP 代理地址填给要用它的应用。
+</td>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/settings.png" alt="设置页：左侧按传入连接、传出连接、通用分组，右侧是访问与密码">
+<br><b>设置</b>：按传入连接、传出连接和通用分组，可以搜索。
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/home-dark.png" alt="深色主题下的主窗口">
+<br><b>深色主题</b>
+</td>
+<td width="50%" valign="top">
+<img src="docs/assets/ui/cm.png" alt="被控端的连接管理小窗，浅色和深色各一张">
+<br><b>被控端的连接管理小窗</b>：显示谁连了进来，可以随时收回键盘鼠标、剪贴板等权限，或者断开。
+</td>
+</tr>
+</table>
 
 ## 简介
 
