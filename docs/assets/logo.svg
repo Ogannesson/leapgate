@@ -1,6 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-<!-- Leapgate placeholder icon: replace once a real design exists. -->
-<rect width="256" height="256" rx="56" fill="#0F766E"/>
-<path d="M76 212V112a52 52 0 0 1 104 0V212z" fill="#FFFFFF"/>
-<circle cx="156" cy="166" r="9" fill="#0F766E"/>
+  <defs>
+    <linearGradient id="remote" x1="84" y1="34" x2="236" y2="158" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2DD4BF"/>
+      <stop offset="1" stop-color="#0EA5E9"/>
+    </linearGradient>
+    <linearGradient id="local" x1="20" y1="98" x2="172" y2="222" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#12857D"/>
+      <stop offset="1" stop-color="#0D6277"/>
+    </linearGradient>
+  </defs>
+  <rect x="84" y="34" width="152" height="124" rx="26" fill="url(#remote)"/>
+  <rect x="20" y="98" width="152" height="124" rx="26" fill="url(#local)"/>
+  <path d="M84 98h62a26 26 0 0 1 26 26v34h-62a26 26 0 0 1-26-26V98z" fill="#FFFFFF"/>
 </svg>
