@@ -189,5 +189,6 @@
 - 项目说明与知识只写本文件，不建 CLAUDE.md。
 - 提交用 agent 自签。
 - 提交说明的语言（维护者 2026-10-24 定）：四个公开仓库（leapgate、leapgate-server、leapgate-client、leapgate-cardo）一律英文；私有的 `internal/`（leapgate-internal）用中文。文档本身仍是中文。
+- 总仓库 README 分中文 `README.md` 和英文 `README.en.md` 两份（维护者 2026-11-19 定），章节、表格、徽章一一对应，改一份就同步改另一份。README 只写公开来源能核实的功能和状态，每个里程碑合入后顺手更新路线图；子模块里的文档用 GitHub 绝对链接（相对路径在 GitHub 上进不了子模块）。
 - 推送：Forgejo 是主远端（`origin` 的 fetch 地址），GitHub 是公开镜像；各仓库和 cardo 的各个克隆都把 `origin` 配成两个 push 地址（先 Forgejo、后 GitHub），一次 `git push` 两边都推。cardo 在 GitHub 上要推 `main`、`leapgate/server`、`leapgate/client` 三个分支。新检出时照此补上：`git remote set-url --add --push origin <Forgejo 地址>`，再 `--add --push origin https://github.com/Ogannesson/<仓库名>.git`。
 - 子模块工作区用 LF：Windows 上检出后在各子模块里设 `core.eol=lf`、`core.autocrlf=false`。sqlx 迁移文件的校验和按字节算，CRLF 检出编出来的程序会和 Linux 构建的对不上。

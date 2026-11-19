@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<!-- Leapgate placeholder icon: replace once a real design exists. -->
+<rect width="256" height="256" rx="56" fill="#0F766E"/>
+<path d="M76 212V112a52 52 0 0 1 104 0V212z" fill="#FFFFFF"/>
+<circle cx="156" cy="166" r="9" fill="#0F766E"/>
+</svg>
