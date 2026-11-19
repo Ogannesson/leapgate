@@ -1,5 +1,7 @@
 # 03 · 第二期 Windows x64 客户端构建链方案
 
+> 历史调研笔记：记录写作当时的读码、实测和判断，其中的计划和结论可能已经过时，以 `docs/architecture.md`、各期实施契约和代码为准。
+
 > Porta 是当时的工作名，2026-10-24 改名为 Leapgate（跃门）。
 
 基线：客户端 `rustdesk@bd92623`（Cargo 版本 1.5.1，`porta-client` 的起点），hbb_common `5d52530`。下文 CI 行号、步骤名都按 `bd92623:.github/workflows/flutter-build.yml`。2026-10-22 用 GitHub API 对照上游 master（`828d110`），构建相关的版本钉值没有变化。

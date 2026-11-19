@@ -1,5 +1,7 @@
 # 05 · 从 rustdesk-api 的 SQLite 迁移用户和地址簿（字段级）
 
+> 历史调研笔记：记录写作当时的读码、实测和判断，其中的计划和结论可能已经过时，以 `docs/architecture.md`、各期实施契约和代码为准。
+
 > Porta 是当时的工作名，2026-10-24 改名为 Leapgate（跃门）。
 
 日期：2026-10-22。基线：`lejianwen/rustdesk-api@c5687e1`（`cmd/apimain.go` 里 `DatabaseVersion = 265`）、客户端 `rustdesk@bd92623`。

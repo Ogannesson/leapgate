@@ -1,5 +1,7 @@
 # 第三期调研 03：心跳、sysinfo、审计改走 libs/porta 的新 API 客户端
 
+> 历史调研笔记：记录写作当时的读码、实测和判断，其中的计划和结论可能已经过时，以 `docs/architecture.md`、各期实施契约和代码为准。
+
 > Porta 是当时的工作名，2026-10-24 改名为 Leapgate（跃门）。
 > 2026-10-23 写。基线：客户端 `rustdesk@bd92623`（`porta-client` main 在 `da315ac`，`sync.rs`、`server/connection.rs` 和基线逐字相同），服务端 `porta-server@e20ca86`。
 > 标记：【读码】读代码确认；【推测】推断或估算，未编译、未实测；没有【实测】结论。
