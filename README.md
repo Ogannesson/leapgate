@@ -19,7 +19,7 @@
 
 [![许可证](https://img.shields.io/github/license/Ogannesson/leapgate?label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](LICENSE)
 [![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%2010%2B-0F766E)](#platforms)
-[![状态](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E5%BC%80%E5%8F%91%E4%B8%AD%20%C2%B7%20%E6%9C%AA%E5%8F%91%E5%B8%83-orange)](#roadmap)
+[![状态](https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E6%9C%AA%E5%8F%91%E5%B8%83-orange)](#roadmap)
 [![基于 RustDesk](https://img.shields.io/badge/%E5%9F%BA%E4%BA%8E-RustDesk-024EFF)](https://github.com/rustdesk/rustdesk)
 [![最后提交](https://img.shields.io/github/last-commit/Ogannesson/leapgate?label=%E6%9C%80%E5%90%8E%E6%8F%90%E4%BA%A4)](https://github.com/Ogannesson/leapgate/commits/main)
 [![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -45,17 +45,17 @@
 </td>
 <td width="50%" valign="top">
 <b>按延迟选中继</b><br>
-开源版 hbbs 在多台中继之间只轮询，客户端也只能填一个中继。Leapgate 按两端到各中继的延迟（IP 库估算，加客户端实测）乘以权重，选代价最小的一台。
+开源版 RustDesk 的服务端 hbbs 在多台中继服务器（hbbr）之间只轮询，客户端也只能填一个中继。Leapgate 按两端到各中继的延迟（IP 地理库估算，加客户端实测）乘以权重，选代价最小的一台。
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <b>自研 ICE 直连</b><br>
-两端交换物理网卡上的候选地址，用 STUN 逐对检查，在打通的那一对上建立连接，和原有的打洞、中继路径竞速。本机开着 TUN 代理也能局域网直连。端到端验收进行中。
+参照 ICE（WebRTC 建立直连的标准做法）自己实现：两端交换候选地址（物理网卡上的地址和服务端看到的公网映射地址），逐对发 STUN 探测包，在能通的那一对上建立连接；它和原有的打洞、中继同时尝试，先通的胜出。本机开着 TUN 模式代理（用虚拟网卡接管全部流量的代理）也能局域网直连。
 </td>
 <td width="50%" valign="top">
 <b>应用出口</b><br>
-被控端打开"允许作为出口"后，控制端本机多出一个 SOCKS5 / HTTP CONNECT 代理，经它发出的 TCP 连接从被控端的物理网卡出去，默认不许访问被控端的局域网。部分验收未完成。
+被控端打开"允许作为出口"后，控制端本机多出一个 SOCKS5 / HTTP CONNECT 代理，经它发出的 TCP 连接从被控端的物理网卡出去，默认不许访问被控端的局域网。
 </td>
 </tr>
 <tr>
@@ -71,13 +71,13 @@
 </table>
 
 > [!WARNING]
-> Leapgate 处在早期开发阶段，没有发布，也没有可下载的安装包，想试用只能从源码构建。目前只支持 Windows 10 及以上（控制端和被控端），构建产物没有代码签名。不建议用于生产环境。设计文档和实施说明只有中文。
+> Leapgate 处在早期开发阶段，没有发布，也没有可下载的安装包，想试用只能从源码构建。服务端和 Windows 客户端的主要功能已经可用，新客户端界面还有几项在开发，移动端控制端在计划中。目前只支持 Windows 10 及以上（控制端和被控端），构建产物没有代码签名。不建议用于生产环境。设计文档和实施说明只有中文。
 
 <a id="preview"></a>
 
 ## 界面预览
 
-新界面有简洁和详细两种显示密度、浅色和深色两套主题，界面语言有简体中文和英文。下面是它的设计稿，图里的设备、人名和数据都是虚构的。每个里程碑合入前，都会拿实现出来的界面对照设计稿做一轮外观检查。
+新界面有简洁和详细两种显示密度、浅色和深色两套主题，界面语言有简体中文和英文。下面是它的设计稿，图里的设备、人名和数据都是虚构的。实现出来的界面会对照设计稿检查外观。
 
 <table>
 <tr>
@@ -116,60 +116,48 @@
 
 Leapgate 沿用 RustDesk 的引擎（抓屏、编解码、输入、传输与加密），重做服务端、连接路径和客户端界面，面向自己运行服务端的用户。名字取 leap（一跃）加 gate（门）：一步跨过去的门，对应打洞直连，也对应出口。
 
-客户端是 rustdesk/rustdesk 的 fork，以后用 `git merge` 合并上游的正式版本（目前还没有合并过）。服务端是 rustdesk-server 的硬分叉，不再合并上游，安全修复手工摘取。
+客户端从 rustdesk/rustdesk 分叉，继续跟随上游，以后用 `git merge` 合并上游的正式版本（目前还没有合并过）。服务端从 rustdesk-server 分叉后独立发展，不再合并上游，安全修复手工摘取。
 
 <a id="features"></a>
 
 ## 主要功能
 
-下面每组末尾的状态用的是[路线图](#roadmap)里的四个词。
-
 ### 服务端和账号
 
-- `leapgate-server` 是从 hbbs 分叉出来的单个进程，内置会合服务、HTTP API、路由策略和 SQLite 数据库。
+- `leapgate-server` 是从 hbbs（RustDesk 的会合服务器，设备在这里登记、交换建立连接所需的信息）分叉出来的单个进程，内置会合服务、HTTP API、路由策略和 SQLite 数据库。
 - HTTP API 提供登录、地址簿、用户组、设备列表和审计日志。地址簿是一本个人簿加多本共享簿，共享簿按只读、读写、完全控制三级授权，可以授权给用户，也可以授权给用户组。
 - 地址簿里保存的设备密码和密码哈希由服务端加密后落盘，防的是数据库文件和备份泄露；服务端的运维者本人仍能解开。
 - 用命令行管理用户、用户组、共享簿和设备（`leapgate-server user ...`、`group ...`、`ab ...`、`device ...`、`relay status`、`stats` 等），没有网页后台。可以从 rustdesk-api 的数据库一次性导入用户、用户组和地址簿。
 - 会合端口上做 TCP 密钥交换，并转发打洞信令里的 IPv6 地址。
 - 兼容原版 RustDesk 客户端（1.4.x 到 1.5.x），这份兼容只保留在最初几个版本。原版客户端要用 IPv6 打洞，需要在控制端的设置里手动勾选"Enable IPv6 P2P connection"。
-- 记录每次连接最后是直连、经中继还是失败，用 `stats` 查看中继回落率。
-
-状态：验收中。
+- 记录每次连接最后是直连、经中继还是失败，用 `stats` 查看中继回落率（没能直连、改走中继的比例）。
 
 ### 选中继
 
-- 服务端用 IP 库（默认自动下载 DB-IP Lite，也可以换成 MaxMind GeoLite）查出两端和各中继的位置与运营商，估算延迟。
+- 服务端用 IP 地理库（默认自动下载 DB-IP Lite，也可以换成 MaxMind GeoLite）查出两端和各中继的位置与运营商，估算延迟。
 - Leapgate 客户端每 5 分钟测一次到各中继的往返，随心跳上报；某一端有实测时，用实测代替估算。
 - 中继的代价是（发起方到中继的延迟 + 被控端到中继的延迟）× 中继权重，在健康检查通过的中继里选代价最小的。权重手工配置，流量贵的中继可以调高；也可以在服务端把某台设备固定到某台中继（`device pin-relay`）。
-- Leapgate 被控端连 leapgate-server 时以服务端选的中继为准；原版被控端本地写死的中继，由服务端经心跳策略清掉。
-
-状态：验收中。
+- Leapgate 被控端连 leapgate-server 时以服务端选的中继为准；原版被控端本地写死的中继，由服务端经心跳下发的策略清掉。
 
 ### 直连
 
-- **自研 ICE。** 两端在物理网卡上收集候选地址，包括 leapgate-server 看到的公网映射地址，经服务端交换（转给被控端的那份既签名又加密），用 STUN 逐对检查，选中一对后在上面跑原有的 KCP 传输。它和上游原有的连接路径竞速，只在两端都是 Leapgate 客户端、服务端是 leapgate-server 时使用，目前只在 Windows 上。端到端验收还没做完。
-- **开 TUN 代理时的局域网直连。** 被控端上报自己物理网卡的地址，控制端并发尝试。前提是两端到服务端的公网地址相同（代理对会合服务器的流量走直连、不经远端出口），且两端都是 Leapgate 客户端。这项功能的端到端测试还没做完。
+- **自研 ICE。** 两端在物理网卡上收集候选地址，包括 leapgate-server 看到的公网映射地址，经服务端交换（转给被控端的那份既签名又加密），逐对发 STUN 探测包，选中一对后在上面跑 RustDesk 原有的 KCP 传输（基于 UDP 的可靠传输）。它和上游原有的连接路径同时尝试、先通的胜出，只在两端都是 Leapgate 客户端、服务端是 leapgate-server 时使用，目前只在 Windows 上。
+- **开 TUN 模式代理时的局域网直连。** 开着 TUN 模式代理时，上游交换的是虚拟网卡地址，直连会失败。Leapgate 被控端上报自己物理网卡的地址，控制端并发尝试。前提是两端到服务端的公网地址相同（代理对会合服务器的流量走直连、不经远端出口），且两端都是 Leapgate 客户端。
 - Leapgate 客户端连自建服务器时默认打开 IPv6 打洞。
-
-状态：验收中。
 
 ### 应用出口
 
-- 被控端在设置里打开"允许作为出口"后，控制端在本机 127.0.0.1 上开一个 SOCKS5 和 HTTP CONNECT 代理，经它发出的每条 TCP 连接变成多路复用隧道里的一个通道，由被控端代为连接。域名交给被控端解析。
+- 被控端在设置里打开"允许作为出口"后，控制端在本机 127.0.0.1 上开一个 SOCKS5 和 HTTP CONNECT 代理，经它发出的每条 TCP 连接成为远程连接里的一个独立通道（一条连接里同时承载多个通道，即多路复用），由被控端代为连接。域名交给被控端解析。
 - 出口流量一律从被控端的物理网卡出去，不经被控端本机的代理、TUN 或 VPN。
 - 被控端默认拒绝访问自己的局域网和本机地址，私网地址可以按网段放行；回环、本机地址、链路本地和云主机元数据地址任何规则都放不开。
 - 服务端只把开着出口的设备列给设备主人和用命令行授权过的用户（`exit grant`）。能不能连上仍由被控端的认证决定（密码、点击确认、二次验证）。
 - 允许走中继，界面上标明这条出口是直连还是经中继。只支持 TCP。
 
-状态：验收中，还有一部分验收没做完。
-
 ### 安全
 
-- 设备签名上报：Leapgate 客户端的心跳、系统信息和审计请求改走 `/api/leapgate/v1/`，用设备私钥签名；服务端首次验签通过后锁定这把公钥，之后同一台设备不签名的上报一律拒收；服务端用会合私钥给响应签名，客户端配了 Key 就强制验签。这条路径不理会"接受无效证书"选项。
-- Leapgate 被控端拒绝旧式的裸管道端口转发（登录后明文传输），只接受多路复用模式。代价是 1.5.0 以前的原版控制端和关掉了多路复用的控制端不能对它做端口转发。
+- 设备签名上报：Leapgate 客户端的心跳、系统信息和审计请求改走 `/api/leapgate/v1/`，用设备私钥签名；服务端首次验签通过后锁定这把公钥，之后同一台设备不签名的上报一律拒收；服务端用会合私钥给响应签名，客户端配了服务端公钥（Key）就强制验签。这条路径不理会"接受无效证书"选项。
+- Leapgate 被控端拒绝不走多路复用的旧式端口转发（登录后数据明文传输），只接受多路复用模式。代价是 1.5.0 以前的原版控制端和关掉了多路复用的控制端不能对它做端口转发。
 - 默认服务器在构建时注入，没有注入的构建不会连 RustDesk 的公共服务器。官方的更新检查和后台自动更新都已关闭，不会从 RustDesk 官方下载安装包。
-
-状态：验收中。
 
 ### 新界面
 
@@ -180,14 +168,10 @@ Leapgate 沿用 RustDesk 的引擎（抓屏、编解码、输入、传输与加�
 - 界面语言有简体中文和英文。
 - 还没有的：TCP 隧道（端口转发和 RDP）、终端、摄像头查看。补上之前，可以用 `build-client.ps1 -Ui upstream` 把上游界面编成便携版来用这几项。两个界面不能同时运行，用上游界面前先退出新界面，装了的连托盘和服务一起停。
 
-状态：里程碑 M0 到 M8、M7b、M9a 开发完成；终端、摄像头查看（M9b）和 TCP 隧道（M9c）进行中。
-
 ### 和原版 RustDesk 共存
 
 - 程序名（`leapgate.exe`、`libleapgate.dll`）、Windows 服务名、配置目录和链接协议（`leapgate://`）都改了名，可以和原版 RustDesk 装在同一台机器上。
 - 上游按第一块网卡的 MAC 地址算默认 ID，同一台机器上的原版和 Leapgate 会算出同一个 ID。Leapgate 第一次生成 ID 时加盐，结果固定为 9 位。
-
-状态：验收中。新界面切换（M8）验收时测过和上游 1.4.9 装在同一台机器上；两边指向同一台服务器时 ID 不冲突的端到端验收还没做。
 
 ## 和开源版 RustDesk 的区别
 
@@ -198,16 +182,16 @@ Leapgate 沿用 RustDesk 的引擎（抓屏、编解码、输入、传输与加�
 | 客户端的中继设置 | 只能填一个地址；被控端的本地设置优先于服务端 | Leapgate 被控端以服务端选的中继为准 |
 | 会合端口的 TCP 密钥交换 | 没有；登录过 API、配了 Key 的客户端连接时等 18 秒后失败 | 有 |
 | 打洞信令里的 IPv6 地址 | hbbs 不转发，IPv6 打洞不会发生 | 转发 |
-| 跨网 UDP 直连 | 开源服务端不在 UDP 上回 NAT 测试，UDP 打洞从没运行过；WebRTC 路径在自建服务器下默认关闭，开源服务端也不转发它的信令 | 自研 ICE（host 和 srflx 候选，服务端自带 STUN） |
-| 本机开 TUN 代理时的局域网直连 | 两端交换的是虚拟网卡地址，直连失败 | 只用物理网卡地址 |
+| 跨网 UDP 直连 | 开源服务端不在 UDP 上回 NAT 测试，UDP 打洞从没运行过；WebRTC 路径在自建服务器下默认关闭，开源服务端也不转发它的信令 | 自研 ICE：试本机网卡地址和公网映射地址，服务端兼做 STUN 服务器（告诉客户端它的公网映射地址） |
+| 本机开 TUN 模式代理时的局域网直连 | 两端交换的是虚拟网卡地址，直连失败 | 只用物理网卡地址 |
 | 心跳、系统信息、审计上报 | 不认证，只靠请求体里的 ID 和 UUID | 设备私钥签名，首次验签后锁定公钥 |
 | 端口转发的目标 | 只能是登录时指定的那一个 | 出口模式下由每条连接各自指定 |
-| 旧式裸管道端口转发 | 登录后明文，经中继时中继能看到原文 | 被控端拒绝 |
+| 不走多路复用的旧式端口转发 | 登录后明文，经中继时中继能看到原文 | 被控端拒绝 |
 | 没配服务器时 | 默认连 RustDesk 官方服务器 | 不连任何公共服务器 |
 | 界面的多窗口 | 每个窗口一个 Flutter engine | 一个主窗口加应用内标签 |
 | 支持的平台 | 多个桌面和移动平台，Windows 上支持到 Windows 7 | 目前只有 Windows 10 及以上 |
 
-左列描述的是 2026-10 读码时的上游版本（客户端 `rustdesk@bd92623`、服务端 `rustdesk-server@873230e`），上游以后的版本可能改变；上游从 1.5.0 起端口转发默认改用多路复用。每一格的依据在 [docs/architecture.md](docs/architecture.md) 第 1、3 节和 [docs/research/](docs/research/) 下的读码笔记里。
+左列描述的是 Leapgate 分叉时的上游版本（客户端 `rustdesk@bd92623`、服务端 `rustdesk-server@873230e`），上游以后的版本可能改变；上游从 1.5.0 起端口转发默认改用多路复用。每一格的依据见 [docs/architecture.md](docs/architecture.md) 和 [docs/research/](docs/research/) 下的调研笔记。
 
 <a id="platforms"></a>
 
@@ -222,7 +206,7 @@ Leapgate 沿用 RustDesk 的引擎（抓屏、编解码、输入、传输与加�
 | macOS、Linux 桌面 | 客户端 | 暂不做 |
 | Windows 10 以前的版本 | 客户端 | 不支持 |
 
-Android 控制端排在桌面新界面之后，iOS 排在 Android 之后。上游引擎本身支持更多平台，Leapgate 前几期只在 Windows 上构建和测试。客户端构建没有代码签名，UAC 会显示"未知发布者"。
+上游引擎本身支持更多平台，Leapgate 目前只在 Windows 上构建和测试。客户端构建没有代码签名，UAC 会显示"未知发布者"。
 
 <a id="architecture"></a>
 
@@ -238,11 +222,11 @@ flowchart TB
     UI --> FFI
     FFI --> ENG
     FFI --> EXT
-    ENG -.->|"上游文件里只加几行挂钩"| EXT
+    ENG -.->|"上游文件里只加几行调用"| EXT
   end
   subgraph S["Leapgate 服务端"]
     subgraph CP["leapgate-server（单进程）"]
-      RV["会合模块<br/>hbbs 硬分叉"]
+      RV["会合模块<br/>从 hbbs 分叉"]
       API["HTTP API<br/>账号 · 地址簿 · 设备 · 审计 · 出口目录"]
       RT["路由策略<br/>选中继 · 健康检查"]
       DB[("SQLite")]
@@ -258,7 +242,7 @@ flowchart TB
   API --- DB
 ```
 
-- 引擎层和平台原生部分跟随上游，Leapgate 自己的逻辑放在扩展层 `libs/leapgate`，新的导出函数放在 `leapgate_ffi.rs`，上游的热点文件里只加几行挂钩。
+- 引擎层和平台原生部分跟随上游，Leapgate 自己的逻辑放在扩展层 `libs/leapgate`，新的导出函数放在 `leapgate_ffi.rs`。上游改动频繁的文件里只加几行调用，把逻辑引到扩展层，减少合并上游时的冲突。
 - 服务端的控制面是 `leapgate-server` 一个进程，数据面是多台 hbbr。hbbr 沿用上游代码，运行时统一配 `-k` 校验 Key。
 - 会话数据要么在两端之间直连传输，要么经 hbbr 中继；leapgate-server 负责设备注册、打洞和 ICE 信令、选中继和 HTTP API。
 
@@ -268,7 +252,7 @@ flowchart TB
 |---|---|---|---|
 | [leapgate](https://github.com/Ogannesson/leapgate) | 本仓库 | 新建 | `main` |
 | [leapgate-client](https://github.com/Ogannesson/leapgate-client) | `client/` | [rustdesk/rustdesk](https://github.com/rustdesk/rustdesk) 的 fork，起点 `bd92623` | `main` |
-| [leapgate-server](https://github.com/Ogannesson/leapgate-server) | `server/` | [rustdesk/rustdesk-server](https://github.com/rustdesk/rustdesk-server) 的硬分叉，起点 `873230e` | `main` |
+| [leapgate-server](https://github.com/Ogannesson/leapgate-server) | `server/` | [rustdesk/rustdesk-server](https://github.com/rustdesk/rustdesk-server) 的分叉（不再合并上游），起点 `873230e` | `main` |
 | [leapgate-cardo](https://github.com/Ogannesson/leapgate-cardo) | `client/libs/hbb_common`、`server/libs/hbb_common` | [rustdesk/hbb_common](https://github.com/rustdesk/hbb_common) 的 fork | `leapgate/client`、`leapgate/server` |
 
 本仓库放文档和构建脚本，用子模块把 `client/` 挂到 leapgate-client、`server/` 挂到 leapgate-server，一次提交就记下了哪个客户端版本配哪个服务端版本。leapgate-cardo 是两边共用的协议和配置库，名字取自拉丁语的"门枢"，客户端和服务端各用一条分支；crate 名仍是 `hbb_common`。
@@ -279,15 +263,10 @@ flowchart TB
 leapgate/
 ├── client/              子模块 leapgate-client
 ├── server/              子模块 leapgate-server
-├── docs/
-│   ├── architecture.md  总体方案和决策记录
-│   ├── research/        调研笔记（读上游代码、选型、实测）
-│   ├── 第三期实施契约/
-│   ├── 第四期实施契约/
-│   └── 新界面/          新界面的内容说明、实施方案和各里程碑的拆法
+├── docs/                设计文档、调研笔记和更细的实施文档（中文）
 └── scripts/
     ├── windows/         客户端构建脚本和 Flutter 引擎补丁
-    ├── linux/           自研 ICE 的 netns NAT 测试
+    ├── linux/           在 Linux 网络命名空间里模拟 NAT、测试自研 ICE 的脚本
     └── e2e/             Windows 端到端测试脚本
 ```
 
@@ -369,40 +348,29 @@ pwsh -File scripts\windows\build-client.ps1 -Source client
 
 ## 路线图
 
-| 阶段 | 内容 | 状态 |
+| 方向 | 内容 | 状态 |
 |---|---|---|
-| 第一期：服务端 | 会合、HTTP API、路由第一级、TCP 密钥交换、IPv6 信令转发、连接结果记录、从 rustdesk-api 导入 | 验收中 |
-| 第二期：客户端骨架 | 改名、Windows 构建链、`libs/leapgate` 骨架、与原版共存 | 验收中 |
-| 第三期：路由和直连 | 设备签名上报、路由第二级、TUN 下的局域网直连、自研 ICE、默认 ID 加盐 | 验收中 |
-| 第四期：应用出口 | 出口目录和授权、被控端出口、控制端本地代理 | 验收中 |
-| 新界面 M0~M8 | 主页、远程会话、连接管理小窗、账号和地址簿、出口页、设置、文件传输；M8 起构建默认编新界面 | 开发完成 |
-| 新界面 M7b | 文件传输的暂停、从失败处重试、跳过个别文件 | 开发完成 |
-| 新界面 M9a | 安装页 | 开发完成 |
-| 新界面 M9b | 终端、摄像头查看 | 进行中 |
-| 新界面 M9c | TCP 隧道（端口转发、RDP） | 进行中 |
-| 新界面 M10 | 升级 Flutter 版本 | 计划中 |
-| 新界面 M11 | Android 控制端 | 计划中 |
-| iOS 控制端 | 排在 Android 之后 | 计划中 |
-| 中继分段延迟 | 连接详情分段显示本机到中继、中继到远程设备的延迟，需要 hbbr 回弹探测帧 | 计划中 |
-| 退出兼容 | 服务端只接受 Leapgate 客户端，删掉为原版客户端保留的兼容代码 | 计划中 |
-| 代码签名 | 分发给别人之前定签名方案 | 计划中 |
+| 服务端和账号 | 内置账号、地址簿、设备列表和审计，设备上报带签名 | 已完成 |
+| 直连与路由 | 按延迟选中继、自研 ICE、开 TUN 模式代理时的局域网直连 | 已完成 |
+| 应用出口 | 把被控设备当成 TCP 出口，控制端本机提供 SOCKS5 / HTTP CONNECT 代理 | 已完成 |
+| 和原版 RustDesk 共存 | 改名后可以和原版装在同一台机器上，默认 ID 不重复 | 已完成 |
+| 新客户端界面（Windows） | 日常功能已经可用，终端、摄像头查看和 TCP 隧道还在开发 | 进行中 |
+| 移动端控制端 | 先 Android、后 iOS，排在桌面新界面之后 | 计划中 |
+| 其他计划 | 连接详情分段显示中继两侧的延迟、结束对原版客户端的兼容、代码签名、全局出口、出口支持 UDP | 计划中 |
 
-四个状态的含义：
+三个状态的含义：
 
-- 开发完成：已合入 main，做过这一块的验收。
-- 验收中：开发已合入 main，端到端验收还没做完。压力测试和多轮对照放在全部开发完成后统一做。
-- 进行中：在分支上开发或验收，还没合入 main。
+- 已完成：功能已实现，可以从源码构建使用。
+- 进行中：一部分已经可用，其余还在开发。
 - 计划中：还没开工。
-
-以后再做、目前没有排期的：全局出口（编排 Tailscale/Headscale 的出口节点）、出口支持 UDP。
 
 ### 不做什么
 
 - 不做 Web 客户端。官方的 Web Client 是闭源的，自己写成本太高。
 - 不支持连接 RustDesk 官方的公共服务器。
 - 不支持 Windows 7。
-- 不自研虚拟网卡 VPN，也不嵌入 tsnet 或 wireguard-go。
-- 不把上游的 WebRTC 路径当主路径。自研 ICE 不做 TURN，中继仍是 hbbr。
+- 不自研虚拟网卡 VPN，也不嵌入 tsnet 或 wireguard-go（Tailscale 和 WireGuard 的 Go 实现）。
+- 不把上游的 WebRTC 路径当主路径。自研 ICE 不做 TURN（ICE 里经第三方服务器转发数据的那一步），中继仍是 hbbr。
 - 已建立的连接不中途换中继，也不同时走多台中继。
 - 不复刻 rustdesk-api 的网页管理后台。
 
@@ -412,12 +380,12 @@ pwsh -File scripts\windows\build-client.ps1 -Source client
 
 文档都是中文。
 
-- [docs/architecture.md](docs/architecture.md)：总体方案、关键决策和没选的备选、明确不做的事、分期。
-- [docs/research/](docs/research/)：调研笔记，读上游代码、界面选型、WebRTC 实测、自研 ICE 设计。
-- [docs/第三期实施契约/](docs/第三期实施契约/README.md)、[docs/第四期实施契约/](docs/第四期实施契约/README.md)：路由和直连、应用出口的实施契约。
-- [docs/新界面/](docs/新界面/)：新界面的内容与逻辑说明、[实施方案](docs/新界面/03-实施方案.md)、各里程碑的拆法和冒烟清单。
-- [server LEAPGATE.md](https://github.com/Ogannesson/leapgate-server/blob/main/LEAPGATE.md)：服务端各模块的范围、配置、存储、命令行和行为。
-- [client LEAPGATE.md](https://github.com/Ogannesson/leapgate-client/blob/main/LEAPGATE.md)：客户端在上游之上的全部改动、挂钩和已知限制，以及新界面的验收记录。
+- [docs/architecture.md](docs/architecture.md)：设计文档，包括总体方案、关键决策和没选的备选、明确不做的事。
+- [docs/research/](docs/research/)：调研笔记，包括上游代码分析、界面选型、WebRTC 实测、自研 ICE 设计。
+- [server LEAPGATE.md](https://github.com/Ogannesson/leapgate-server/blob/main/LEAPGATE.md)：服务端的改动说明，包括各模块的范围、配置、存储、命令行和行为。
+- [client LEAPGATE.md](https://github.com/Ogannesson/leapgate-client/blob/main/LEAPGATE.md)：客户端的改动说明，包括在上游之上的全部改动和已知限制。
+
+[docs/](docs/) 下还有更细的设计和实施文档。
 
 ## 参与和反馈
 

@@ -19,7 +19,7 @@
 
 [![License](https://img.shields.io/github/license/Ogannesson/leapgate)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2B-0F766E)](#platforms)
-[![Status](https://img.shields.io/badge/status-pre--release-orange)](#roadmap)
+[![Status](https://img.shields.io/badge/status-unreleased-orange)](#roadmap)
 [![Based on RustDesk](https://img.shields.io/badge/based%20on-RustDesk-024EFF)](https://github.com/rustdesk/rustdesk)
 [![Last commit](https://img.shields.io/github/last-commit/Ogannesson/leapgate)](https://github.com/Ogannesson/leapgate/commits/main)
 [![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -45,17 +45,17 @@ The server handles login, personal and shared address books, user groups, the de
 </td>
 <td width="50%" valign="top">
 <b>Latency-based relay selection</b><br>
-Open-source hbbs rotates through its relays round-robin, and the client takes a single relay address. Leapgate weighs each relay by the latency from both ends (estimated from IP data, plus client measurements) and picks the cheapest.
+The open-source RustDesk server, hbbs, rotates through its relay servers (hbbr) round-robin, and the client takes a single relay address. Leapgate weighs each relay by the latency from both ends (estimated from an IP geolocation database, plus client measurements) and picks the cheapest.
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 <b>Its own ICE for direct connections</b><br>
-Both ends exchange candidate addresses from their physical network adapters, check pairs with STUN and connect over the pair that works, racing the existing hole-punching and relay paths. LAN connections work even with a TUN-mode proxy running. End-to-end acceptance in progress.
+A from-scratch implementation of ICE, the standard way WebRTC sets up direct connections. Both ends exchange candidate addresses (addresses on their physical network adapters, plus the public mapping the server sees), send STUN probes pair by pair, and connect over a pair that works. This runs alongside the existing hole-punching and relay paths, and whichever connects first wins. LAN connections work even with a TUN-mode proxy (one that takes over all traffic through a virtual network adapter) running.
 </td>
 <td width="50%" valign="top">
 <b>Application-level exit node</b><br>
-Once the controlled device turns on "Allow as exit node", the controlling side gets a local SOCKS5 / HTTP CONNECT proxy, and TCP connections through it leave from the controlled device's physical adapter. Its LAN is off limits by default. Acceptance partly done.
+Once the controlled device turns on "Allow as exit node", the controlling side gets a local SOCKS5 / HTTP CONNECT proxy, and TCP connections through it leave from the controlled device's physical adapter. Its LAN is off limits by default.
 </td>
 </tr>
 <tr>
@@ -71,13 +71,13 @@ A separate Flutter project with one main window and in-app tabs. It covers the h
 </table>
 
 > [!WARNING]
-> Leapgate is in early development. There is no release and no installer; the only way to try it is to build from source. Only Windows 10 and later is supported for now, on both the controlling and the controlled side, and builds are not code-signed. It is not ready for production use. The design documents and implementation notes are in Chinese only.
+> Leapgate is in early development. There is no release and no installer; the only way to try it is to build from source. The main features of the server and the Windows client work; a few parts of the new client UI are still in development, and mobile controlling clients are planned. Only Windows 10 and later is supported for now, on both the controlling and the controlled side, and builds are not code-signed. It is not ready for production use. The design documents and implementation notes are in Chinese only.
 
 <a id="preview"></a>
 
 ## Screens
 
-The new UI has a compact and a detailed density, light and dark themes, and comes in Simplified Chinese and English. The pictures below are its design mockups, drawn in Chinese with made-up devices, names and data. Before each milestone is merged, the implemented UI is checked against these mockups for appearance.
+The new UI has a compact and a detailed density, light and dark themes, and comes in Simplified Chinese and English. The pictures below are its design mockups, drawn in Chinese with made-up devices, names and data. The implemented UI is checked against these mockups for appearance.
 
 <table>
 <tr>
@@ -116,60 +116,48 @@ The new UI has a compact and a detailed density, light and dark themes, and come
 
 Leapgate keeps RustDesk's engine (screen capture, codecs, input, transport and encryption) and reworks the server, the connection path and the client UI. It is meant for people who run their own server. The name is *leap* + *gate*: a gate you cross in one step, as with a direct connection or an exit node. The Chinese name is 跃门.
 
-The client is a fork of rustdesk/rustdesk. Upstream releases will be brought in with `git merge`; none has been merged yet. The server is a hard fork of rustdesk-server: upstream changes are not merged, and security fixes are picked by hand.
+The client is a fork of rustdesk/rustdesk that keeps following upstream: upstream releases will be brought in with `git merge`; none has been merged yet. The server was forked from rustdesk-server and has gone its own way: upstream changes are not merged, and security fixes are picked by hand.
 
 <a id="features"></a>
 
 ## Features
 
-Each group ends with a status, using the four terms defined in the [roadmap](#roadmap).
-
 ### Server and accounts
 
-- `leapgate-server` is a single process forked from hbbs, with rendezvous, an HTTP API, relay routing and a SQLite database built in.
+- `leapgate-server` is a single process forked from hbbs (RustDesk's rendezvous server, where devices register and exchange what they need to connect), with rendezvous, an HTTP API, relay routing and a SQLite database built in.
 - The HTTP API covers login, address books, user groups, the device list and audit logs. Each user has one personal address book and can be granted shared ones at three levels: read-only, read-write and full control. Grants can go to users or to user groups.
 - Device passwords and password hashes stored in address books are encrypted by the server before they are written to disk. This protects database files and backups; the server operator can still decrypt them.
 - Users, groups, shared address books and devices are managed from the command line (`leapgate-server user ...`, `group ...`, `ab ...`, `device ...`, `relay status`, `stats` and so on). There is no web admin panel. Users, groups and address books can be imported once from a rustdesk-api database.
 - The rendezvous port does a TCP key exchange, and IPv6 addresses in hole-punching messages are forwarded.
 - Stock RustDesk clients (1.4.x to 1.5.x) are supported, but only for the first few Leapgate versions. To use IPv6 hole punching, a stock client has to tick "Enable IPv6 P2P connection" in the controlling side's settings.
-- The server records whether each connection ended up direct, relayed or failed; `stats` shows the relay fallback rate.
-
-Status: in acceptance.
+- The server records whether each connection ended up direct, relayed or failed; `stats` shows the relay fallback rate (the share of connections that could not go direct and used a relay).
 
 ### Relay selection
 
-- The server looks up the location and carrier of both ends and of each relay in an IP database (DB-IP Lite, downloaded automatically by default, or MaxMind GeoLite) and estimates latency from them.
+- The server looks up the location and carrier of both ends and of each relay in an IP geolocation database (DB-IP Lite, downloaded automatically by default, or MaxMind GeoLite) and estimates latency from them.
 - Leapgate clients measure the round trip to each relay every 5 minutes and report it with their heartbeat. Where one end has measurements, they replace the estimate.
 - A relay's cost is (latency from the initiator + latency from the controlled device) × the relay's weight, and the cheapest healthy relay wins. Weights are set by hand, so a relay with expensive traffic can be given a higher one. A device can also be pinned to a relay on the server (`device pin-relay`).
-- A Leapgate controlled device connected to leapgate-server uses the relay the server picks. A relay hard-coded in a stock controlled device's local settings is cleared by the server through the heartbeat policy.
-
-Status: in acceptance.
+- A Leapgate controlled device connected to leapgate-server uses the relay the server picks. A relay hard-coded in a stock controlled device's local settings is cleared by a policy the server sends with its heartbeat responses.
 
 ### Direct connections
 
-- **ICE of its own.** Both sides gather candidate addresses on their physical network adapters, including the public mapping that leapgate-server sees, and exchange them through the server (the offer forwarded to the controlled side is signed and encrypted). Candidate pairs are checked with STUN, and the existing KCP transport runs over the selected pair. It races the upstream connection path and is used only between two Leapgate clients on leapgate-server, currently on Windows only. End-to-end acceptance is not finished.
-- **LAN connections under a TUN-mode proxy.** The controlled side reports the addresses of its physical network adapters and the controlling side tries them in parallel. This applies when both ends reach the server from the same public address (the proxy sends rendezvous traffic out directly rather than through a remote exit) and both ends run Leapgate. End-to-end testing of this feature is not finished.
+- **ICE of its own.** Both sides gather candidate addresses on their physical network adapters, including the public mapping that leapgate-server sees, and exchange them through the server (the offer forwarded to the controlled side is signed and encrypted). Candidate pairs are probed with STUN, and RustDesk's existing KCP transport (reliable delivery over UDP) runs over the selected pair. It runs alongside the upstream connection path, whichever connects first wins, and is used only between two Leapgate clients on leapgate-server, currently on Windows only.
+- **LAN connections under a TUN-mode proxy.** With a TUN-mode proxy running, upstream exchanges the virtual adapter's address and the direct connection fails. A Leapgate controlled device reports the addresses of its physical network adapters and the controlling side tries them in parallel. This applies when both ends reach the server from the same public address (the proxy sends rendezvous traffic out directly rather than through a remote exit) and both ends run Leapgate.
 - Leapgate clients turn on IPv6 hole punching by default when using a self-hosted server.
-
-Status: in acceptance.
 
 ### Exit node
 
-- Once the controlled device turns on "Allow as exit node", the controlling side opens a SOCKS5 and HTTP CONNECT proxy on 127.0.0.1. Each TCP connection made through it becomes a channel in a multiplexed tunnel, and the controlled device makes the actual connection. Domain names are resolved on the controlled device.
+- Once the controlled device turns on "Allow as exit node", the controlling side opens a SOCKS5 and HTTP CONNECT proxy on 127.0.0.1. Each TCP connection made through it becomes its own channel inside the remote connection (many channels share one connection, i.e. multiplexing), and the controlled device makes the actual connection. Domain names are resolved on the controlled device.
 - Exit traffic always leaves through the controlled device's physical network adapter, not through a proxy, TUN or VPN running on it.
 - By default the controlled device refuses its own LAN and local addresses. Private ranges can be allowed by CIDR; loopback, the device's own addresses, link-local and cloud metadata addresses cannot be opened by any rule.
 - The server lists exit devices only to their owners and to users granted access from the command line (`exit grant`). Whether a connection is accepted is still up to the controlled device's authentication (password, click to accept, two-factor).
 - Relays are allowed, and the UI shows whether an exit runs direct or through a relay. Only TCP is supported.
 
-Status: in acceptance, with part of the acceptance testing still to do.
-
 ### Security
 
-- Signed device reports: Leapgate clients send heartbeat, system-info and audit requests to `/api/leapgate/v1/` and sign them with the device key. The server pins that key on the first successful verification and from then on rejects unsigned reports from the device. The server signs its responses with the rendezvous key, and a client configured with a key requires the signature. This path ignores the "accept invalid certificates" option.
-- A Leapgate controlled device refuses the old raw-pipe port forwarding, which sends data in plain text after login, and accepts only multiplexed tunnels. As a result, stock controlling clients older than 1.5.0, or ones with multiplexing turned off, cannot set up port forwarding to it.
+- Signed device reports: Leapgate clients send heartbeat, system-info and audit requests to `/api/leapgate/v1/` and sign them with the device key. The server pins that key on the first successful verification and from then on rejects unsigned reports from the device. The server signs its responses with the rendezvous key, and a client configured with the server's public key requires the signature. This path ignores the "accept invalid certificates" option.
+- A Leapgate controlled device refuses the old non-multiplexed port forwarding, which sends data in plain text after login, and accepts only multiplexed tunnels. As a result, stock controlling clients older than 1.5.0, or ones with multiplexing turned off, cannot set up port forwarding to it.
 - Default servers are injected at build time; a build without them never connects to RustDesk's public servers. The official update check and the background auto-update are both disabled, so nothing is downloaded from RustDesk.
-
-Status: in acceptance.
 
 ### New UI
 
@@ -180,14 +168,10 @@ Status: in acceptance.
 - UI languages: Simplified Chinese and English.
 - Not yet available: TCP tunnels (port forwarding and RDP), the terminal and the camera viewer. Until they are, `build-client.ps1 -Ui upstream` builds upstream's UI as a portable copy for these. The two UIs cannot run at the same time: quit the new UI before starting upstream's, and if it is installed, stop its tray and service too.
 
-Status: milestones M0 to M8, M7b and M9a are done; the terminal and camera viewer (M9b) and TCP tunnels (M9c) are in progress.
-
 ### Side by side with stock RustDesk
 
 - The program (`leapgate.exe`, `libleapgate.dll`), the Windows service, the configuration directory and the URL scheme (`leapgate://`) are all renamed, so Leapgate can be installed on the same machine as RustDesk.
 - Upstream derives the default ID from the MAC address of the first network adapter, so RustDesk and Leapgate on one machine would get the same ID. Leapgate salts the ID when it first generates one; the result is always 9 digits.
-
-Status: in acceptance. Installing next to upstream 1.4.9 on the same machine was tested during the UI switch (M8); end-to-end acceptance that the two get different IDs on the same server has not been done.
 
 ## How it differs from open-source RustDesk
 
@@ -198,16 +182,16 @@ Status: in acceptance. Installing next to upstream 1.4.9 on the same machine was
 | Client relay setting | A single address; the controlled side's local setting overrides the server | A Leapgate controlled device uses the relay the server picks |
 | TCP key exchange on the rendezvous port | None; a client logged in to the API with a key configured fails to connect after 18 seconds | Yes |
 | IPv6 addresses in hole-punching messages | Dropped by hbbs, so IPv6 hole punching never happens | Forwarded |
-| Direct UDP connections across networks | The open-source server never answers NAT tests over UDP, so UDP hole punching never runs; the WebRTC path is off by default on self-hosted servers and the open-source server does not relay its signalling | Its own ICE (host and srflx candidates, STUN on the server) |
+| Direct UDP connections across networks | The open-source server never answers NAT tests over UDP, so UDP hole punching never runs; the WebRTC path is off by default on self-hosted servers and the open-source server does not relay its signalling | Its own ICE: tries local adapter addresses and public mappings, with the server doubling as a STUN server (telling clients their public mapping) |
 | LAN connections with a TUN-mode proxy running | The two ends exchange virtual adapter addresses and the direct connection fails | Physical adapter addresses only |
 | Heartbeat, system-info and audit reports | Not authenticated; identified only by the ID and UUID in the request body | Signed with the device key, key pinned on first verification |
 | Port forwarding target | Only the one fixed at login | In exit mode, set per connection |
-| Old raw-pipe port forwarding | Plain text after login, readable by the relay when relayed | Refused by the controlled side |
+| Old non-multiplexed port forwarding | Plain text after login, readable by the relay when relayed | Refused by the controlled side |
 | No server configured | Connects to RustDesk's public servers | Connects to no public server |
 | Multiple windows in the UI | One Flutter engine per window | One main window with in-app tabs |
 | Platforms | Several desktop and mobile platforms, back to Windows 7 on Windows | Windows 10 and later only, for now |
 
-The left column describes upstream as read in October 2026 (client `rustdesk@bd92623`, server `rustdesk-server@873230e`); later upstream versions may differ. Upstream switched port forwarding to multiplexed tunnels by default in 1.5.0. The basis for each cell is in sections 1 and 3 of [docs/architecture.md](docs/architecture.md) and in the code-reading notes under [docs/research/](docs/research/).
+The left column describes upstream as of the commits Leapgate forked from (client `rustdesk@bd92623`, server `rustdesk-server@873230e`); later upstream versions may differ. Upstream switched port forwarding to multiplexed tunnels by default in 1.5.0. The basis for each cell is in [docs/architecture.md](docs/architecture.md) and the research notes under [docs/research/](docs/research/).
 
 <a id="platforms"></a>
 
@@ -222,7 +206,7 @@ The left column describes upstream as read in October 2026 (client `rustdesk@bd9
 | macOS, Linux desktop | Client | Not for now |
 | Windows before 10 | Client | Not supported |
 
-The Android client comes after the desktop UI, and iOS after Android. The upstream engine supports more platforms, but the first Leapgate phases are built and tested on Windows only. Client builds are not code-signed, so UAC shows "Unknown publisher".
+The upstream engine supports more platforms, but Leapgate is currently built and tested on Windows only. Client builds are not code-signed, so UAC shows "Unknown publisher".
 
 <a id="architecture"></a>
 
@@ -238,11 +222,11 @@ flowchart TB
     UI --> FFI
     FFI --> ENG
     FFI --> EXT
-    ENG -.->|"a few hook lines in upstream files"| EXT
+    ENG -.->|"a few added calls in upstream files"| EXT
   end
   subgraph S["Leapgate server"]
     subgraph CP["leapgate-server (single process)"]
-      RV["Rendezvous<br/>hard fork of hbbs"]
+      RV["Rendezvous<br/>forked from hbbs"]
       API["HTTP API<br/>accounts · address books · devices · audit · exit directory"]
       RT["Routing<br/>relay selection · health checks"]
       DB[("SQLite")]
@@ -258,7 +242,7 @@ flowchart TB
   API --- DB
 ```
 
-- The engine and the platform-native parts follow upstream. Leapgate's own logic lives in `libs/leapgate`, new exported functions go in `leapgate_ffi.rs`, and upstream's frequently changed files only get a few lines of hooks.
+- The engine and the platform-native parts follow upstream. Leapgate's own logic lives in `libs/leapgate` and new exported functions go in `leapgate_ffi.rs`. Upstream's frequently changed files only get a few added calls that hand off to that layer, which keeps merges from upstream small.
 - On the server side, `leapgate-server` is the control plane and one or more hbbr instances are the data plane. hbbr keeps upstream's code and runs with `-k` so it checks the key.
 - Session data goes either directly between the two ends or through an hbbr relay; leapgate-server handles device registration, hole-punching and ICE signalling, relay selection and the HTTP API.
 
@@ -268,7 +252,7 @@ flowchart TB
 |---|---|---|---|
 | [leapgate](https://github.com/Ogannesson/leapgate) | This repository | New | `main` |
 | [leapgate-client](https://github.com/Ogannesson/leapgate-client) | `client/` | Fork of [rustdesk/rustdesk](https://github.com/rustdesk/rustdesk), from `bd92623` | `main` |
-| [leapgate-server](https://github.com/Ogannesson/leapgate-server) | `server/` | Hard fork of [rustdesk/rustdesk-server](https://github.com/rustdesk/rustdesk-server), from `873230e` | `main` |
+| [leapgate-server](https://github.com/Ogannesson/leapgate-server) | `server/` | Fork of [rustdesk/rustdesk-server](https://github.com/rustdesk/rustdesk-server) that no longer merges upstream, from `873230e` | `main` |
 | [leapgate-cardo](https://github.com/Ogannesson/leapgate-cardo) | `client/libs/hbb_common`, `server/libs/hbb_common` | Fork of [rustdesk/hbb_common](https://github.com/rustdesk/hbb_common) | `leapgate/client`, `leapgate/server` |
 
 This repository holds the documentation and build scripts, and pins `client/` to leapgate-client and `server/` to leapgate-server as submodules, so each commit records which client goes with which server. leapgate-cardo is the protocol and configuration library both sides share; the name is Latin for the pivot a door turns on. The client and the server each use their own branch of it, and the crate is still called `hbb_common`.
@@ -279,15 +263,10 @@ This repository holds the documentation and build scripts, and pins `client/` to
 leapgate/
 ├── client/              submodule leapgate-client
 ├── server/              submodule leapgate-server
-├── docs/
-│   ├── architecture.md  overall design and decision record
-│   ├── research/        research notes (upstream code reading, technology choices, measurements)
-│   ├── 第三期实施契约/   phase 3 implementation contracts
-│   ├── 第四期实施契约/   phase 4 implementation contracts
-│   └── 新界面/          new UI: content spec, implementation plan, per-milestone plans
+├── docs/                design documents, research notes and more detailed implementation docs (Chinese)
 └── scripts/
     ├── windows/         client build scripts and Flutter engine patches
-    ├── linux/           netns NAT test for the ICE implementation
+    ├── linux/           ICE tests against NAT simulated in Linux network namespaces
     └── e2e/             Windows end-to-end test scripts
 ```
 
@@ -369,40 +348,29 @@ To pass several values to `-Steps`, call the script directly from pwsh (`scripts
 
 ## Roadmap
 
-| Stage | Scope | Status |
+| Area | Scope | Status |
 |---|---|---|
-| Phase 1: server | Rendezvous, HTTP API, first-level routing, TCP key exchange, IPv6 signalling, connection outcome records, rustdesk-api import | In acceptance |
-| Phase 2: client groundwork | Renaming, Windows build chain, `libs/leapgate` skeleton, coexistence with stock RustDesk | In acceptance |
-| Phase 3: routing and direct connections | Signed device reports, second-level routing, LAN connections under TUN, ICE, salted default ID | In acceptance |
-| Phase 4: exit node | Exit directory and grants, exit on the controlled side, local proxy on the controlling side | In acceptance |
-| New UI M0–M8 | Home window, remote sessions, connection manager, accounts and address books, exit page, settings, file transfer; from M8 the build uses the new UI by default | Done |
-| New UI M7b | Pause, retry from the failed file and skipping single files in file transfer | Done |
-| New UI M9a | Install page | Done |
-| New UI M9b | Terminal, camera viewer | In progress |
-| New UI M9c | TCP tunnels (port forwarding, RDP) | In progress |
-| New UI M10 | Flutter upgrade | Planned |
-| New UI M11 | Android controlling client | Planned |
-| iOS controlling client | After Android | Planned |
-| Per-segment relay latency | Connection details show the latency from this device to the relay and from the relay to the remote device separately; needs hbbr to echo probe frames | Planned |
-| End of compatibility | The server accepts only Leapgate clients, and the code kept for stock clients is removed | Planned |
-| Code signing | Decide on signing before builds are given to others | Planned |
+| Server and accounts | Built-in accounts, address books, device list and audit; signed device reports | Done |
+| Direct connections and routing | Latency-based relay selection, ICE, LAN connections under a TUN-mode proxy | Done |
+| Exit node | A controlled device as a TCP exit, through a local SOCKS5 / HTTP CONNECT proxy on the controlling side | Done |
+| Side by side with stock RustDesk | Renamed so it installs next to RustDesk on one machine, without sharing the default ID | Done |
+| New client UI (Windows) | Everyday features work; the terminal, camera viewer and TCP tunnels are still in development | In progress |
+| Mobile controlling clients | Android first, then iOS, after the desktop UI | Planned |
+| Other plans | Per-segment relay latency in connection details, ending compatibility with stock clients, code signing, a global exit node, UDP for the exit node | Planned |
 
-What the four statuses mean:
+What the three statuses mean:
 
-- Done: merged into main and accepted for that milestone.
-- In acceptance: development merged into main, end-to-end acceptance not finished. Stress tests and repeated comparison runs are done together once all development is finished.
-- In progress: being developed or accepted on a branch, not yet merged into main.
+- Done: the feature is implemented and can be built from source and used.
+- In progress: part of it works, the rest is still being developed.
 - Planned: not started.
-
-Later, with no schedule yet: a global exit node (orchestrating Tailscale/Headscale exit nodes) and UDP support for the exit node.
 
 ### Not planned
 
 - No web client. The official Web Client is closed source, and writing one from scratch costs too much.
 - No connecting to RustDesk's public servers.
 - No Windows 7 support.
-- No home-grown virtual-adapter VPN, and no embedding of tsnet or wireguard-go.
-- Upstream's WebRTC path is not the main path. Leapgate's ICE does no TURN; relays are still hbbr.
+- No home-grown virtual-adapter VPN, and no embedding of tsnet or wireguard-go (the Go implementations behind Tailscale and WireGuard).
+- Upstream's WebRTC path is not the main path. Leapgate's ICE does no TURN (the part of ICE that relays data through a third-party server); relays are still hbbr.
 - An established connection does not switch relays midway or use several relays at once.
 - No copy of rustdesk-api's web admin panel.
 
@@ -412,12 +380,12 @@ Later, with no schedule yet: a global exit node (orchestrating Tailscale/Headsca
 
 The documentation is in Chinese.
 
-- [docs/architecture.md](docs/architecture.md): overall design, key decisions and the alternatives not chosen, what is out of scope, and the phases.
+- [docs/architecture.md](docs/architecture.md): the design document, covering the overall design, key decisions and the alternatives not chosen, and what is out of scope.
 - [docs/research/](docs/research/): research notes on upstream code, UI technology choices, WebRTC measurements and the ICE design.
-- [docs/第三期实施契约/](docs/第三期实施契约/README.md), [docs/第四期实施契约/](docs/第四期实施契约/README.md): implementation contracts for routing and direct connections, and for the exit node.
-- [docs/新界面/](docs/新界面/): the new UI's content and logic specs, [implementation plan](docs/新界面/03-实施方案.md), per-milestone plans and smoke checklist.
-- [server LEAPGATE.md](https://github.com/Ogannesson/leapgate-server/blob/main/LEAPGATE.md): scope, configuration, storage, command line and behaviour of every server module.
-- [client LEAPGATE.md](https://github.com/Ogannesson/leapgate-client/blob/main/LEAPGATE.md): every change made on top of upstream, the hooks and known limitations, and the new UI's acceptance records.
+- [server LEAPGATE.md](https://github.com/Ogannesson/leapgate-server/blob/main/LEAPGATE.md): notes on the server's changes, covering the scope, configuration, storage, command line and behaviour of every server module.
+- [client LEAPGATE.md](https://github.com/Ogannesson/leapgate-client/blob/main/LEAPGATE.md): notes on the client's changes, covering everything changed on top of upstream and the known limitations.
+
+[docs/](docs/) also has more detailed design and implementation documents.
 
 ## Contributing and feedback
 
