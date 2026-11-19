@@ -1,6 +1,6 @@
 # 第四期实施契约（总述）
 
-状态（2026-10-27）：设计决策清单里要维护者拍板的 11 条已全部按推荐定，其余 69 条按推荐默认（§1.3）。01、02、03 三块初稿都已写好（02 于 2026-10-27 交付）。整份契约经维护者确认后再派 coder。A3 已单独合入，见 `server/LEAPGATE.md` §6 第 8 条（leapgate-server `1241ca7`）。
+本目录是第四期（应用出口）的实施契约，把设计决策清单的 80 条决定落到三块：其中 11 条单列在 §1.3，其余 69 条以清单原文为准。A3 单独实现，见 `server/LEAPGATE.md` §6 第 8 条。
 
 | 文件 | 内容 | 仓库 |
 |---|---|---|
@@ -32,29 +32,29 @@
 - 设计决策清单（80 条决定）和它依据的读码笔记 `docs/research/第四期/01-客户端读码.md`、`02-服务端读码.md`。
 - `docs/architecture.md` §3.9（已定架构；随契约要更正的几处见 §8.1）、§3.3 客户端改动纪律。
 - `client/LEAPGATE.md` §1：逻辑放 `libs/leapgate`，上游文件只加一两行挂钩，前一行注释 `// leapgate: <一句话>`，只加不改。服务端契约 `server/LEAPGATE.md`。
-- 原则：P-2（规则对所有运行环境都适用，不要求用户配环境规则）；如非必要勿增实体；校验只针对会变的东西；兼容原版只在最初几个版本；开发期间每块只做单测和一次冒烟，压力、吞吐和多轮对照放进开发全部完成后的统一验收（维护者 2026-10-26 定）。
+- 原则：P-2（规则对所有运行环境都适用，不要求用户配环境规则）；如非必要勿增实体；校验只针对会变的东西；兼容原版只在最初几个版本；开发期间每块只做单测和一次冒烟，压力、吞吐和多轮对照放进开发全部完成后的统一验收。
 
-### 1.3 维护者的决定（2026-10-27）
+### 1.3 单列的决定
 
-下面 11 条全部按推荐定。其余 69 条按推荐默认，以清单原文为准；契约不推翻、不改写任何一条。清单"评审之间的出入"一节已取定的四处（控制端挂钩在 `start_one_port_forward` 开头、HTTP 非 CONNECT 回 501、逐通道检查放 `on_open`、登录关口写在规范化之后）照取定的写。
+下面 11 条单列出来。其余 69 条以清单原文为准；契约不推翻、不改写任何一条。清单"评审之间的出入"一节已取定的四处（控制端挂钩在 `start_one_port_forward` 开头、HTTP 非 CONNECT 回 501、逐通道检查放 `on_open`、登录关口写在规范化之后）照取定的写。
 
 | 编号 | 决定 |
 |---|---|
 | E1 | 第一版 `CHANNEL_WINDOW`（每个通道的流控窗口，256 KiB）不动，吞吐实测并进统一验收，判定规则预先写死（§6.2）；单流目标值取 30 Mbit/s |
-| F7 | 上游 Flutter 界面的改动列为 architecture §3.3 过渡期的例外，清单写死（§3.2），超出清单要维护者同意 |
+| F7 | 上游 Flutter 界面的改动列为 architecture §3.3 过渡期的例外，清单写死（§3.2），超出清单要另行决定 |
 | A2 | 选 (a)：服务端只做目录和授权表，被控端的出口开关加上游认证是唯一关口；不做服务端签发的出口凭证 |
 | A8 | 不改 `enable-tunnel` 的默认值，普通端口转发不加过滤；契约写清"局域网默认拒绝"只约束出口模式，防什么、不防什么 |
 | A9 | architecture §3.9 "已信任的设备"那半句更正为"设备密码，或被控端有人点击接受；开了 2FA 时，已信任的设备免 2FA"，不新增免密码机制 |
 | B4 | 放行网段存被控端 Config `leapgate-exit-allow-nets`（CIDR 或单个地址）；只能打开"软拒"档，回环和本机地址在任何规则下都打不开 |
 | B9 | 出口流量一律从被控端物理网卡出去，不经本机的 TUN 代理、全隧道 VPN 和 RustDesk 自己的 socks 设置 |
-| B10 | 被控端所在网络的 DNS 只回 fake-ip 地址（198.18.0.0/15）时默认拒绝，IP 字面量照常能用；唯一开口是放行列表写 198.18.0.0/15；不加 DoH。维护者按推荐定，即认可"默认的安全不依赖这条配置，配置只用来解锁功能"不违反 P-2 |
+| B10 | 被控端所在网络的 DNS 只回 fake-ip 地址（198.18.0.0/15）时默认拒绝，IP 字面量照常能用；唯一开口是放行列表写 198.18.0.0/15；不加 DoH。判定"默认的安全不依赖这条配置，配置只用来解锁功能"不违反 P-2 |
 | C5 | 选 (A)：隧道层（登录、对端支持与否、是否加密）结果准确回报；通道层乐观地先回"连接成功"；不加 proto 字段 |
 | C7 | "设为系统代理"不进第一版；出口行给可复制的 `socks5h://` 和 HTTP 地址，附浏览器配置方法 |
 | C13 | 控制端逐通道的目标和成败只用 trace 级别；日志文件只记隧道级事件和不带地址的限频计数 |
 
-### 1.4 主会话的裁定和统稿取定
+### 1.4 补充取定
 
-**出口哨兵统一用端口 65536**（主会话裁定，解决清单"评审之间的出入"：C1、C2 写的是端口 1，F1 建议 65536）。线上登录和本地映射都用 `PortForward{host="leapgate-exit.invalid", port=65536, multiplex=true}`。理由：普通添加行输不出 65536；万一被 1.5.0 以前的原版被控端拿去走裸管道，解析端口当场失败、不查 DNS，安全不依赖 `.invalid` 解析失败（和 P-2 一致）。各条路径逐一核实过，没有一处把它截成 u16 或拒掉【读码】：
+**出口哨兵统一用端口 65536**（解决清单"评审之间的出入"：C1、C2 写的是端口 1，F1 建议 65536）。线上登录和本地映射都用 `PortForward{host="leapgate-exit.invalid", port=65536, multiplex=true}`。理由：普通添加行输不出 65536；万一被 1.5.0 以前的原版被控端拿去走裸管道，解析端口当场失败、不查 DNS，安全不依赖 `.invalid` 解析失败（和 P-2 一致）。各条路径逐一核实过，没有一处把它截成 u16 或拒掉【读码】：
 
 | 路径 | 处理 | 结论 |
 |---|---|---|
@@ -67,9 +67,9 @@
 | CM（`try_start_cm` 经 IPC 发整串；`flutter/lib/desktop/pages/server_page.dart:524-528` 显示） | 字符串 | 02 改成显示"作为出口"（F2） |
 | 1.5.0 以前原版被控端的裸管道 `TcpStream::connect(&addr)`（现树 `connection.rs:1821` 同一写法） | std 在最后一个冒号处切开，端口按 u16 解析 | 65536 报 `InvalidInput`，不发 DNS 查询【推测，按 std 实现推断，S0 的单测钉住】 |
 
-**A3**（服务端不再把控制端的 API 令牌转给被控端）已单独合入，见 `server/LEAPGATE.md` §6 第 8 条，本契约不再展开。
+**A3**（服务端不再把控制端的 API 令牌转给被控端）单独实现，见 `server/LEAPGATE.md` §6 第 8 条，本契约不再展开。
 
-**统稿时取定的几处**（清单没写死，或三块起草时提出；主会话可以推翻）：
+**另外取定的几处**（清单没写死的）：
 1. **登录关口用守卫分支**。上游端口转发分支里 `enable-tunnel` 的检查在规范化之前（`connection.rs:2970`），关口写进那个分支就等于要求 `enable-tunnel`，违反 A5。所以 02 在登录 `match lr.union` 里、上游 `Some(login_request::Union::PortForward(mut pf)) => {`（`connection.rs:2969`）之前另加一个分支，分支里先规范化、再过关口；这就是清单说的"写在规范化之后"，契约只保留这一种写法：
    ```rust
                    // leapgate: an exit login passes the exit gate, not enable-tunnel (phase 4 A5, A11)
@@ -83,7 +83,7 @@
                    }
    ```
    位置在 IP 白名单（`connection.rs:1507`）和 ID 白名单（`:2923`）之后、密码校验和审批之前，符合 A11 的顺序。
-2. **B10 和 B12 的文案数**：B10 要把"被控端所在网络的 DNS 返回了 fake-ip 地址"告诉控制端，B12 在 C5 (A) 下只给两条固定文案。统稿把这层意思并进策略拒绝那条（§2.4 `MSG_BLOCKED`），不加第三条。
+2. **B10 和 B12 的文案数**：B10 要把"被控端所在网络的 DNS 返回了 fake-ip 地址"告诉控制端，B12 在 C5 (A) 下只给两条固定文案。这层意思并进策略拒绝那条（§2.4 `MSG_BLOCKED`），不加第三条。
 3. **C3 ③ 的实际表现**：清单写对方会看到"一闪而过"的卡片，这只在密码模式下成立；点击确认模式下卡片等主人批准，批准后控制端拿到 PeerInfo、发现没有出口位才断开。决定本身不变，兼容表照实际写（§5）。
 4. 两个新 key 不进 `KEYS_SETTINGS`（定制客户端可以预设的 key 表，`libs/base/src/config/keys.rs:272`）：没有预设出口的需求。
 5. `libs/leapgate` 版本 0.3.1 → 0.4.0，放在 S0（§2.6）。服务端不按版本判断出口（01 §2.4），只作标识。
@@ -135,7 +135,7 @@
 两侧共用的东西先做成一个小提交 S0，合进 leapgate-client main 之后 02、03 再从它开分支，各改各的文件：
 - `libs/base/protos/message.proto`：§2.2 的字段。
 - `libs/leapgate/Cargo.toml` 版本 0.4.0；`Cargo.lock` 只改 leapgate 那一项的版本号（`Cargo.lock:4348`）；`libs/leapgate/src/lib.rs` 加 `pub mod exit;`、`pub mod lang;`。
-- `libs/leapgate/src/exit/mod.rs`：声明子模块 `pub mod dial;`（02：B1、B2、B11；主 crate 的 M-3~M-5 要用 `dial::Target`、`connect`、`failure_message`）、`mod policy;`（02：B3、B4、B12，只有 `dial` 用）、`pub mod directory;`、`pub mod proxy;`（03，主 crate 的 `src/leapgate_hooks/exit.rs` 要用），四个空文件一并建好；常量 `SENTINEL_HOST`、`SENTINEL_PORT: i32 = 65536`、`OPTION_ALLOW_EXIT`、`OPTION_ALLOW_NETS`、§2.4 的五条文案；函数 `is_exit_target`、`allowed`、`login_refusal` 和私有纯函数 `refusal`。单测：03 §5.1 的 T8（含 std 解析 `leapgate-exit.invalid:65536` 返回 `InvalidInput`）、`refusal` 的三项顺序（八种组合，纯函数，不读写 Config；`allowed()` 只认 "Y" 靠审查把关）。
+- `libs/leapgate/src/exit/mod.rs`：声明子模块 `pub mod dial;`（02：B1、B2、B11；主 crate 的 M-3~M-5 要用 `dial::Target`、`connect`、`failure_message`）、`mod policy;`（02：B3、B4、B12，只有 `dial` 用）、`pub mod directory;`、`pub mod proxy;`（03，主 crate 的 `src/leapgate_hooks/exit.rs` 要用），四个空文件一并建好；常量 `SENTINEL_HOST`、`SENTINEL_PORT: i32 = 65536`、`OPTION_ALLOW_EXIT`、`OPTION_ALLOW_NETS`、§2.4 的五条文案；函数 `is_exit_target`、`allowed`、`login_refusal` 和私有纯函数 `refusal`。单测：03 §5.1 的 T8（含 std 解析 `leapgate-exit.invalid:65536` 返回 `InvalidInput`）、`refusal` 的三项顺序（八种组合，纯函数，不读写 Config；`allowed()` 只认 "Y" 不写单测，靠代码审阅保证）。
 - `libs/leapgate/src/lang.rs`：`pub fn get(lang: &str, key: &str) -> Option<&'static str>`，只在 `lang == "zh-cn"` 时查两张静态表 `CONTROLLER`（03 填；S0 先放 §2.4 的五条）和 `CONTROLLED`（02 填，S0 为空）。`get()` 先查 `CONTROLLER` 再查 `CONTROLLED`，两张表的 key 合起来不得重复。文件里依次是 `CONTROLLER`、`get()`、`CONTROLLED`、`#[cfg(test)] mod tests`；T10（两张表合起来 key 不重复、中文非空、每条中英文的 `{}` 个数相同）由 S0 写进这个 tests 模块，02、03 只往各自的表里加行，都不改 tests 模块。带 `{}` 的条目照上游占位规则（`src/lang.rs:297-314`）。
 - `src/lang.rs` `translate_locale` 的挂钩：03 §3.7 的 H-3 原样挪进 S0（286 行之后、287 行 `if lang != "en" {` 之前）。
 - `flutter/lib/leapgate/exit_tunnel.dart`：只放 `kLeapgateExitHost`、`kLeapgateExitPort = 65536`、`bool isLeapgateExit(String host, int port)` 和 `bool isLeapgateExitAddress(String addr) => addr == '$kLeapgateExitHost:$kLeapgateExitPort';`；03 之后往里加控件。CM（`server_page.dart:524-528`，拿到的是整串 `client.portForward`）用 `isLeapgateExitAddress(client.portForward)`，TCP 隧道页（03）用 `isLeapgateExit(host, port)`。
@@ -148,7 +148,7 @@
 | S0 | leapgate-client | `exit/mod.rs` 及四个空子模块、`lang.rs`、`exit_tunnel.dart`（只有常量） | `libs/leapgate/src/lib.rs`、`Cargo.toml`、`Cargo.lock`（只改 leapgate 那一项的版本号，`:4348`） | `message.proto` 1 个字段；`src/lang.rs` H-3 |
 | 01 | leapgate-server | `src/api/exit.rs`、`migrations/0007_exit_grant.sql` | 硬分叉，不分自有和上游：`api/mod.rs`、`api/device.rs`、`api/account.rs`、`api/group.rs`、`peer.rs`、`ice_signal.rs`、`main.rs`、`cli/mod.rs`、`cli/manage.rs`、`cli/ops.rs`、测试里两处字面量、`LEAPGATE.md`（01 §3.1） | — |
 | 02 | leapgate-client | `exit/policy.rs`、`exit/dial.rs` 的内容；共用 DNS 模块（`ice/dns.rs` 挪成 `libs/leapgate/src/dns.rs`，B2）；`flutter/lib/leapgate/exit_settings.dart`（设置页的 part 文件） | `lib.rs`（加 `dns` 模块）、`ice/`（改用共用 DNS 模块，B11 复用 STUN 探测）、`lan.rs`（IPv4 前缀长度，B3 要本机链路网段；`Nic` 另加一个字段，收本机全部 IPv6 单播地址，不看 DadState、含已弃用的临时地址，在 `nics()` 的 `:425`（IPv4 的 `extend`）旁加一行 extend，和 IPv4 的收法一致，供 B3 的"本机所有网卡地址"硬拒用。现有 `ipv6` 字段的 Preferred 筛选不改：ICE 收候选（`ice/gather.rs:81`）和 `is_physical` 用它）、`options.rs`（A7 的共用判断函数 `is_leapgate_local_option`，§2.3）、`report/heartbeat.rs`（`exit` 字段，`merge_strategy` 改调 options 里的判断）、`lang.rs` 的 `CONTROLLED` 表、`Cargo.toml`（`cidr-utils = "0.5"`，主 crate 已有同版本）、`Cargo.lock` | `connection.rs`：登录守卫分支（§1.4）、B5 一处（上游端口转发分支 `enable-tunnel` 检查之后）、`connect_port_forward_if_needed` 建 mux 之后一行（M-1）、Features 一行、B8 每秒定时器约 3 行；`server/port_forward_mux.rs`：M-1~M-5 五处（见表下）；`sync.rs:296` 一行；`desktop_setting_page.dart` 2 行；`server_page.dart` 1 处判断（`isLeapgateExitAddress(client.portForward)`）加 1 行 import |
-| 03 | leapgate-client | `exit/proxy.rs`、`exit/directory.rs` 的内容；`src/leapgate_hooks/exit.rs` | `exit/mod.rs`（控制端常量和 `after_login`）、`api.rs`（`get_user`）、`lang.rs` 的 `CONTROLLER` 表、`exit_tunnel.dart`（控件）、`flutter/lib/leapgate/exit_nodes.dart`（新）、`src/leapgate_hooks.rs`（`pub(crate) mod exit;`） | `ui_session_interface.rs` H-1、`flutter_ffi.rs` H-2、`port_forward.rs` H-4/H-5（C11）和 V-1~V-3（H-6 已随 K0 合入）、`port_forward_page.dart` 约 15 行、`connection_page.dart` 菜单 1 项加 1 行 import（03 §3.7、§3.8） |
+| 03 | leapgate-client | `exit/proxy.rs`、`exit/directory.rs` 的内容；`src/leapgate_hooks/exit.rs` | `exit/mod.rs`（控制端常量和 `after_login`）、`api.rs`（`get_user`）、`lang.rs` 的 `CONTROLLER` 表、`exit_tunnel.dart`（控件）、`flutter/lib/leapgate/exit_nodes.dart`（新）、`src/leapgate_hooks.rs`（`pub(crate) mod exit;`） | `ui_session_interface.rs` H-1、`flutter_ffi.rs` H-2、`port_forward.rs` H-4/H-5（C11）和 V-1~V-3（H-6 随 K0 实现）、`port_forward_page.dart` 约 15 行、`connection_page.dart` 菜单 1 项加 1 行 import（03 §3.7、§3.8） |
 
 02 在 `server/port_forward_mux.rs` 的五处改动写死如下（行号对照 `a57605c2f`；为什么允许改上游语句见 §3.2）：
 - **M-1**：`struct PortForwardMux`（`:34-41`）加字段 `pub(super) leapgate_exit: Option<String>`（出口隧道时是控制端 ID，否则 `None`），`new()`（`:44-51`）里加一行 `leapgate_exit: None,`；`new` 的签名和 `connection.rs:1814` 的调用都不改。`connection.rs` 的 `connect_port_forward_if_needed` 在 `:1815` `});` 之后、`:1816` `return` 之前插一行：用 `:1806` 取出的原始 `pf` 判 `leapgate::exit::is_exit_target(&pf.host, pf.port)`，为真时把 `self.lr.my_id` 写进这个字段。B8 定时器也看这个字段。
@@ -163,22 +163,22 @@ proto 只在 `libs/base`，三块都不动 cardo，不需要两条 cardo 线的 
 - `exit/mod.rs`：S0 之后只有 03 往里加东西；02 的全部代码放 `policy.rs`、`dial.rs`，不改 `mod.rs`。
 - `lang.rs`：02 只改 `CONTROLLED` 表，03 只改 `CONTROLLER` 表，两张表之间隔着 `get()`，合并不会冲突。02 不得用 `CONTROLLER` 里已有的 key（如 `Exit node`、`Exit nodes`）另配中文，要另起 key。
 - `lib.rs`、`Cargo.toml`、`Cargo.lock`：S0 之后只有 02 改。`src/leapgate_hooks.rs`：只有 03 改。`exit_tunnel.dart`：只有 03 改，02 只 import。
-- 上游文件两侧没有重叠。F7 例外清单就是上表"上游文件挂钩"一列里的四个 Dart 文件和 `ui_session_interface.rs`、`flutter_ffi.rs`、`lang.rs` 三处界面挂钩，新 Dart 文件都放 `flutter/lib/leapgate/`。超出清单的上游界面改动要维护者同意。
+- 上游文件两侧没有重叠。F7 例外清单就是上表"上游文件挂钩"一列里的四个 Dart 文件和 `ui_session_interface.rs`、`flutter_ffi.rs`、`lang.rs` 三处界面挂钩，新 Dart 文件都放 `flutter/lib/leapgate/`。超出清单的上游界面改动要另行决定。
 - 本期上游 Rust 的非界面改动：`connection.rs`、`server/port_forward_mux.rs`、`sync.rs`（02），`port_forward.rs`（03）。合并上游正式版本前要再查一次 `port_forward_mux.rs`、`server/port_forward_mux.rs`、`port_forward.rs` 有没有被改（清单"写契约前还缺的事实"最后一条）。
-- `server/port_forward_mux.rs` 是 C8 下允许的上游修改：除了 03 在 `port_forward.rs` 的 V-1~V-3（只改可见性）和 K0（KCP 守卫修复，含 H-6，改 `port_forward.rs`、`port_forward_mux.rs` 的几处签名和绑定，§4 第 0.5 步），它是本期唯一既插入、又改上游语句（函数签名、条件、调用实参）的非界面 Rust 文件（C8 不许另写一份通道处理）。改动以 §3.1 的 M-1~M-5 为限，超出要维护者同意；合并上游时，冲突面就是这五处。
-- `client/LEAPGATE.md`：由主会话在 02、03 都合入后，在 leapgate-client 上单独一个提交一次改完（§8.2），02、03 的 coder 都不改它。
+- `server/port_forward_mux.rs` 是 C8 下允许的上游修改：除了 03 在 `port_forward.rs` 的 V-1~V-3（只改可见性）和 K0（KCP 守卫修复，含 H-6，改 `port_forward.rs`、`port_forward_mux.rs` 的几处签名和绑定，§4 第 0.5 步），它是本期唯一既插入、又改上游语句（函数签名、条件、调用实参）的非界面 Rust 文件（C8 不许另写一份通道处理）。改动以 §3.1 的 M-1~M-5 为限，超出要另行决定；合并上游时，冲突面就是这五处。
+- `client/LEAPGATE.md`：在 02、03 都合入后，在 leapgate-client 上单独一个提交一次改完（§8.2），02、03 的实现提交都不改它。
 
 ## 4. 实施顺序
 
 | 步 | 内容 |
 |---|---|
-| 0 | 整份契约经维护者确认；同时按 §8.1 改架构和笔记，和契约用同一个提交 |
-| 0.5 | **K0**（维护者 2026-10-27 定）：KCP 守卫修复单独一个提交合进 leapgate-client main，在 S0 之前。`connect_and_login`、`connect_and_login_mux` 不再丢掉 `Client::start` 返回的 `KcpStream`：`LoginOutcome` 带上它（即 03 的 H-6），`establish_tunnel` 经 `set_muxed` 交给 `tunnel_loop` 持有到隧道结束，`run_legacy` 和裸管道那条路径交给转发任务持有。只改 `src/port_forward.rs`、`src/port_forward_mux.rs` 两个上游文件，每处前一行 `// leapgate:` 注释；不改出口相关的任何东西。这是修 bug，冒烟并进第 4 步的联合冒烟（两端 Leapgate、ICE 胜出时普通 TCP 隧道能持续收发）；同时把问题报上游 |
+| 0 | 契约定稿；同时按 §8.1 改架构和笔记，和契约用同一个提交 |
+| 0.5 | **K0**：KCP 守卫修复单独一个提交合进 leapgate-client main，在 S0 之前。`connect_and_login`、`connect_and_login_mux` 不再丢掉 `Client::start` 返回的 `KcpStream`：`LoginOutcome` 带上它（即 03 的 H-6），`establish_tunnel` 经 `set_muxed` 交给 `tunnel_loop` 持有到隧道结束，`run_legacy` 和裸管道那条路径交给转发任务持有。只改 `src/port_forward.rs`、`src/port_forward_mux.rs` 两个上游文件，每处前一行 `// leapgate:` 注释；不改出口相关的任何东西。这是修 bug，冒烟并进第 4 步的联合冒烟（两端 Leapgate、ICE 胜出时普通 TCP 隧道能持续收发）；上游也有这个问题 |
 | 1 | S0 合进 leapgate-client main（不挪子模块指针，S0 不改任何行为） |
-| 2 | 三路并行：01 在 leapgate-server 的 `p4/exit` 分支；02 在 leapgate-client 的 `p4/exit-controlled`，03 在 `p4/exit-controller`，都从 S0 开。03 的第一个提交单独做 C11（H-4、H-5 和它们用的两个常量），出口相关的放后面的提交 |
-| 3 | 各块单测、审查后合进各自 main（merge，不 rebase main）。客户端 03 审完就可以合；02 要等 B15 (a)(b) 有了记录才合（控制端要用能开出口通道的 03 分支构建，见下面的"风险"）。后合的一方变基；按 §3.2 不会有文本冲突。01 和客户端之间没有编译依赖，合入先后不限（01 §4） |
+| 2 | 三块并行：01 在 leapgate-server 的 `p4/exit` 分支；02 在 leapgate-client 的 `p4/exit-controlled`，03 在 `p4/exit-controller`，都从 S0 开。03 的第一个提交单独做 C11（H-4、H-5 和它们用的两个常量），出口相关的放后面的提交 |
+| 3 | 各块单测后合进各自 main（merge，不 rebase main）。客户端 03 做完就可以合；02 要等 B15 (a)(b) 有了记录才合（控制端要用能开出口通道的 03 分支构建，见下面的"风险"）。后合的一方变基；按 §3.2 不会有文本冲突。01 和客户端之间没有编译依赖，合入先后不限（01 §4） |
 | 4 | 三块都合入后跑一次联合冒烟（§6.1；B15 (a)(b) 在 02 合入前已经跑过，沿用记录） |
-| 5 | 总仓库挪子模块指针：服务端在 01 合入后挪一次；客户端在 02、03 都合入后，主会话先在 leapgate-client 上单独一个提交改完 `client/LEAPGATE.md`（§3.2），再挪一次指针。提交说明英文；同时按 §8.2 同步文档 |
+| 5 | 总仓库挪子模块指针：服务端在 01 合入后挪一次；客户端在 02、03 都合入后，先在 leapgate-client 上单独一个提交改完 `client/LEAPGATE.md`（§3.2），再挪一次指针。提交说明英文；同时按 §8.2 同步文档 |
 
 风险：02 的 B2（连接绑物理网卡地址、DNS 问那块网卡自己的服务器）有一个前提还没验证：被控端开着 fake-ip TUN 时，绑物理网卡地址的出站 TCP 会不会绕过 TUN（第三期只测过 UDP）。所以 B15 (a)(b) 不等联合冒烟，在 02 合入 leapgate-client main 之前先跑：被控端用 02 分支的构建，控制端用 03 分支的构建。两条分支都从 S0 开，各自就能编，不做临时合并，也不写测试驱动。这一步算开发期那一次冒烟的前置部分，联合冒烟（第 4 步）沿用它的记录、不重跑。(a) 不成立，或 (b) 出现经本机代理或 VPN 绕过地址过滤的结果（02 §5.2），02 就不合入，B2、B9 回到设计关卡；strict-route 挡住物理网卡的 DNS 属于 B10 的已知限制，只记录。
 
@@ -212,7 +212,7 @@ proto 只在 `libs/base`，三块都不动 cardo，不需要两条 cardo 线的 
   - 经出口的这些项里，至少一次是 ICE 胜出（控制端日志有 `leapgate ice: selected`）。
   - 顺手记一下下载速度（E1），只记不判。
 
-### 6.2 统一验收（开发全部完成后，无人值守）
+### 6.2 统一验收（开发全部完成后）
 - **E1 吞吐**：ICE（第三期自研的直连）和强制中继两条路径，各测单流下载、4 个并行下载、单流上传，工具用 Windows 自带的 `curl.exe --socks5-hostname`。设 F = 256 KiB ÷ RTT，U 为不经隧道直接上下载的基线速度。单流达到 0.8 × min(F, U) 算符合预期；F < U 且单流低于 30 Mbit/s 时，先把窗口调到 512 KiB 复测，最多到 1 MiB（调大时 `UPDATE_THRESHOLD` 钉成字面量 128 KiB，E2）；单流低于 0.6 × min(F, U) 说明瓶颈在窗口之外，窗口不动、另立问题。同一轮核对 hbbr 的 `SINGLE_BANDWIDTH=256`（01 §5.3）。测完把 architecture §3.9 的吞吐数字换成实测值。
 - **E7**：8 条下载跑满被控端上行时，新开一个通道到收到首字节的时间。只测量，结果写进已知限制。
 - **局域网保护的穷举**：B3 的每一类地址各找一个真实目标（本机地址那一类另加一个被控端已弃用的临时 IPv6 地址，可用 `Get-NetIPAddress -AddressState Deprecated` 查到），分别用 IP 字面量和"解析到它的域名"（含把 IP 写进域名的公共 DNS 服务，模拟 DNS 重绑定）走一遍；答案里同时有被拒和允许的地址时只连允许的；放行列表逐一打开每个软拒类别、确认打不开任何硬拒类别；198.18 字面量回 `MSG_FAKE_IP_LITERAL`。在被控端不开 TUN、开 fake-ip TUN 两种环境各跑一轮，有路由器 fake-ip 的网络时再加一轮。
@@ -240,24 +240,22 @@ proto 只在 `libs/base`，三块都不动 cardo，不需要两条 cardo 线的 
 
 ## 8. 要同步的文档
 
-`AGENTS.md` 的状态行由主会话写，不归任何一块。
-
 ### 8.1 随契约定稿同步
-派 coder 之前改完，和契约用同一个提交（§4 第 0 步）。这些都是决定或读码更正，和实现无关，不等合入。
+开始实现之前改完，和契约用同一个提交（§4 第 0 步）。这些都是决定或读码更正，和实现无关。
 - `docs/architecture.md`：
-  - §3.9 `:331` 按 A9 改括号里那半句，注明 2026-10-27 读码更正。
+  - §3.9 `:331` 按 A9 改括号里那半句，注明是读码更正。
   - `:342` "多条流并行可以叠加"补一句：只在 TCP 路径成立，ICE（KCP）路径的整条隧道另受约 1.15 MiB ÷ RTT 的限制。
   - `:343` 按清单改写：降速判据是"会话从配对起算的平均速率超过约 84.5 Mb/s 且已超过 30 分钟（每秒检查，降了不恢复，重连后从头算）"；"空闲 30 秒断开"改成"静默 31~34 秒断开，多路复用的出口会话有 TestDelay（被控端每秒一次的测延迟报文）保活，不会触发"；"TCP 套 TCP"改成队头阻塞和单条拥塞窗口；hbbr 参数名写全大写加下划线。
   - `:344` 和 §5 第四期 `:423` 按 E1 改成"第一版窗口不动，吞吐实测并进统一验收，判定规则见第四期契约 README §6.2"。
   - `:225` 补一句"配了 `-k` 也只挡住没拿到会合公钥的人，而公钥随每个客户端分发"。
-  - §3.9 末尾加 2026-10-27 的细化说明，指向本契约：出口开关不进权限卡片、不受访问模式管（A5）；局域网默认拒绝只约束出口模式（A8）；放行打不开回环和本机（B4）；出口流量从物理网卡出去（B9）；系统代理不进第一版（C7）；"改 `on_open` 那一处判断"细化为过滤点在实际连接那一步（C8，`on_open` 只看得到字符串，挡不住域名解析到内网）；拒绝裸管道只影响 1.5.0 以前的原版控制端和关掉复用选项的控制端（清单更正事实）。
-  - §3.3 加 F7 例外的一句，指向本文 §3.2；§7 决策记录的 Exit Node 一条加 2026-10-27 的细化说明。
+  - §3.9 末尾加第四期的细化说明，指向本契约：出口开关不进权限卡片、不受访问模式管（A5）；局域网默认拒绝只约束出口模式（A8）；放行打不开回环和本机（B4）；出口流量从物理网卡出去（B9）；系统代理不进第一版（C7）；"改 `on_open` 那一处判断"细化为过滤点在实际连接那一步（C8，`on_open` 只看得到字符串，挡不住域名解析到内网）；拒绝裸管道只影响 1.5.0 以前的原版控制端和关掉复用选项的控制端（清单更正事实）。
+  - §3.3 加 F7 例外的一句，指向本文 §3.2；§7 决策记录的 Exit Node 一条加第四期的细化说明。
 - `docs/research/04-ExitNode与传输层复用.md` 第 82 行"KCP 和 WebRTC 底层没有这个问题"：加更正注（KCP 也是可靠有序流，同样有队头阻塞），只加注、不改原文。
 
 ### 8.2 实施合入时同步
 只留按最终代码写的两份：
 - `server/LEAPGATE.md`：按 01 §3.8 的逐节表。
-- `client/LEAPGATE.md`（主会话在 02、03 都合入后单独一个提交改，§3.2、§4 第 5 步）：§2 模块列表加 `exit/`、`lang.rs`、`dns.rs`；新增 §9"应用出口（第四期）"：上游挂钩全表（§3.1 最后一列和 M-1~M-5，含 F7 例外）、`leapgate exit:` 固定日志（03 §3.9；02 §3.3 的 B7 拒绝行和 B11 的 `public IPv4 unavailable` 行）、兼容（本文 §5）、已知限制、合并上游时要核对的三个文件；§8"不配也能用"加一行：被控端开 TUN 或全隧道 VPN 时出口仍从物理网卡出去，不用配规则（B9）。
+- `client/LEAPGATE.md`（02、03 都合入后单独一个提交改，§3.2、§4 第 5 步）：§2 模块列表加 `exit/`、`lang.rs`、`dns.rs`；新增 §9"应用出口（第四期）"：上游挂钩全表（§3.1 最后一列和 M-1~M-5，含 F7 例外）、`leapgate exit:` 固定日志（03 §3.9；02 §3.3 的 B7 拒绝行和 B11 的 `public IPv4 unavailable` 行）、兼容（本文 §5）、已知限制、合并上游时要核对的三个文件；§8"不配也能用"加一行：被控端开 TUN 或全隧道 VPN 时出口仍从物理网卡出去，不用配规则（B9）。
 
 ## 9. 工作量估计【推测】
 
@@ -270,4 +268,4 @@ proto 只在 `libs/base`，三块都不动 cardo，不需要两条 cardo 线的 
 | 联合冒烟、文档同步 | 2 |
 | 合计 | 约 18.5 |
 
-统一验收（§6.2）约 2~3 天，开发全部完成后无人值守跑，不计在内。
+统一验收（§6.2）约 2~3 天，开发全部完成后跑，不计在内。

@@ -1,14 +1,14 @@
-第三期实施契约 · 第 4 块，总述和维护者的决定见 README.md。状态：P-1、P-3 已定（2026-10-23）；§2.5 的 UDP 出口证明是按维护者对 P-2 定的原则新拟的机制，待维护者确认。
+第三期实施契约 · 第 4 块，总述和决定见 README.md。P-1、P-3 的决定见 §8；§2.5 的 UDP 出口证明是按 P-2 的原则新拟的机制，随本块收缩没有采用。
 
-> **2026-10-24 收缩**（维护者定笔记 07 §9 Q4，README §1.3）：§3.6 的 WebRTC/ICE 评估已完成（笔记 06 §9.3），结论是直连改走 Leapgate 自研的 ICE（`05-自研ICE.md`）。两端的 srflx（服务端看到的 NAT 映射地址）本来就是 ICE 的一对候选，检查用 Leapgate 自己的 STUN，所以本块的 UDP 打洞整套不做，**上游 UDP 打洞维持第一期的状态**（服务端不转发 `udp_port`，`server/LEAPGATE.md` §6 第 2 条不变），IPv4 跨网打洞由 05 的 srflx 对完成。本块从没实现过，"复用"指把规格搬进 05、由 05 实现：token 的格式和 `seal`/`open` 改作 srflx 的反射地址证明，令牌桶给服务端的 STUN 用。§4.4 降为可选。上面的状态行和下面的正文都不删，留作设计记录，和 05 冲突时以 05 为准。逐节去留：
+> **收缩**（笔记 07 §9 Q4，README §1.3）：§3.6 的 WebRTC/ICE 评估的结论（笔记 06 §9.3）是直连改走 Leapgate 自研的 ICE（`05-自研ICE.md`）。两端的 srflx（服务端看到的 NAT 映射地址）本来就是 ICE 的一对候选，检查用 Leapgate 自己的 STUN，所以本块的 UDP 打洞整套不做，**上游 UDP 打洞维持第一期的状态**（服务端不转发 `udp_port`，`server/LEAPGATE.md` §6 第 2 条不变），IPv4 跨网打洞由 05 的 srflx 对完成。本块从没实现过，"复用"指把规格搬进 05、由 05 实现：token 的格式和 `seal`/`open` 改作 srflx 的反射地址证明，令牌桶给服务端的 STUN 用。§4.4 降为可选。下面的正文不删，留作设计记录，和 05 冲突时以 05 为准。逐节去留：
 >
 > | 节 | 去留 | 说明 |
 > |---|---|---|
 > | §1 四道障碍（UDP 上回 TestNat、UDP 来的 `PunchHoleSent`、转发 `udp_port`/`is_udp`、客户端默认开 UDP 打洞） | 不做 | 上游 UDP 打洞维持现状；IPv4 跨网打洞由 05 的 srflx 对完成（笔记 06 §9.2 S3 实测 4/4） |
-> | §1"UDP 出口证明"、§2.5.1、§2.5.3~§2.5.6、§8 P-2 那条"待维护者确认" | 不做 | ICE 不做同网判定，两端对候选逐对实测；P-2 的原则不变，落在 05 上（README §1.1 P-2 的 2026-10-24 更新） |
+> | §1"UDP 出口证明"、§2.5.1、§2.5.3~§2.5.6、§8 P-2 那条 | 不做 | ICE 不做同网判定，两端对候选逐对实测；P-2 的原则不变，落在 05 上（README §1.1 P-2"改走自研 ICE 后"一段） |
 > | §1"NAT 类型判断"、§8 P-3（H-a） | 不做 | ICE 不看 NAT 类型 |
 > | §1"开 TUN 时的 IPv6 直连"、§4.4、§6.1 `physical_global_v6` 测试、§6.3 第 7 条、§9 第 15 条 | **降为可选**，优先级低 | 只对"Leapgate 控制端连原版被控端、控制端开 TUN"有用（两端都是 Leapgate 时由 05 的全局 IPv6 host 候选完成）；做的话依赖 05 补的 `has_gateway_v6`、`is_global`、`excluded_v6`，排在 05 之后（README §2 F 步） |
-> | §1"WebRTC/ICE"、§3.6、§8"不回复即按推荐"那条 | 已完成 | 笔记 06 §9：ICE 思路成立，上游实现不采用 |
+> | §1"WebRTC/ICE"、§3.6、§8"其余"那条 | 有结论 | 笔记 06 §9：ICE 思路成立，上游实现不采用 |
 > | §2.1 proto（`leapgate_pad`、`leapgate_udp_token` ×2、`leapgate_nonce` ×2、`leapgate_udp_addr`） | 不做 | 这 6 个字段从没进过 proto（两条 cardo 线都只有 `leapgate_from_id` 和两个 `leapgate_local_addrs`），作废即可，不需要 `reserved` |
 > | §2.2 能力宣告和"被控端支不支持"、§3.1 `echoes_nonce`/`HB_FRESH`/`MIN_LEAPGATE_VER`、§3.4 | 机制搬进 05 | `features` 加的是 `"ice"`，不是 `"udp-punch"`；被控端要 `leapgate_hb` 在 180 秒内、`leapgate_ver ≥ 3010`（0.3.1），05 另要求设备公钥已被锁定；"和 01 同一次发布时版本条件恒真，但保留，防降级"的理由照搬（05 §2.12） |
 > | §4.5（不动的部分） | 历史 | 本来就不改，现在仍不改 |
@@ -24,14 +24,14 @@
 > | §5 兼容矩阵 | 不做 | — |
 > | §6.1 token 测试 | 搬进 05 | `seal` 后 `open` 往返、改任一字节、过期、长度不对；"令牌桶耗尽后都不回"也搬 |
 > | §6.1 其余、§6.2、§6.3 第 1~6、8、9 条 | 不做 | 05 有自己的 netns + nftables 真实 NAT 集成测试和 S1~S5 端到端 |
-> | §8 P-1 | 改了做法 | 见 README §1.1 P-1 的 2026-10-24 更新 |
+> | §8 P-1 | 改了做法 | 见 README §1.1 P-1"改走自研 ICE 后"一段 |
 > | §9 第 1~14 条 | 不做 | 第 7 条（令牌桶全局、被灌满时大家都拿不到）、第 12 条（重启后全部失效）改写后搬进 05 的已知限制 |
 
 # UDP 打洞的前置障碍、UDP 出口证明、NAT 类型判断、开 TUN 时的 IPv6 直连、WebRTC/ICE 评估
 
 > 标注：【读码】读过现版源码；【实测：解密日志】笔记 05 引用的 UU 控制端日志里写着的；【推测】推断，没有实测。代码锚点对照 leapgate-client `68e1259fa`、leapgate-server `bff8a17`、leapgate-cardo 客户端线 `a3d96d4` / 服务端线 `375e2a3`、上游 `rustdesk@bd92623`、`rustdesk-server@873230e`。依据是 `docs/research/第三期/05-UU远程的直连与打洞.md`（下称"笔记 05"）。
 
-> **这一块改了一条已拍板的决定。** `docs/architecture.md` §3.8 原定"UDP 打洞修不修，到第三期看中继回落率再定"。笔记 05 §5 发现开源服务端从不在 UDP 上回 `TestNatRequest`，控制端的 `udp_port` 恒为 0，UDP 打洞从来没跑过，现有回落率里 UDP 打洞是零，说明不了"修了值不值"。维护者 2026-10-23 已确认按"第三期先修前置障碍"来做（README §1.1 P-1）。
+> **这一块改了一条已定的决定。** `docs/architecture.md` §3.8 原定"UDP 打洞修不修，到第三期看中继回落率再定"。笔记 05 §5 发现开源服务端从不在 UDP 上回 `TestNatRequest`，控制端的 `udp_port` 恒为 0，UDP 打洞从来没跑过，现有回落率里 UDP 打洞是零，说明不了"修了值不值"。所以改成"第三期先修前置障碍"（README §1.1 P-1）。
 
 术语：
 - **UDP 打洞**：两端同时往对方在 NAT 上的映射地址发 UDP 包，让两边路由器都留下放行记录，之后在这条 UDP 上跑 KCP（UDP 上的可靠传输）。上游已有这条路径，只是从没跑通。
@@ -54,7 +54,7 @@ UDP 打洞挡着四道独立的障碍【读码，现版逐条核对】：
 | 4 | Leapgate 客户端对自建服务器默认不开 UDP 打洞 | `leapgate-client:libs/leapgate/src/options.rs` `self_hosted_punch_default` |
 
 和它绑在一起的四件事：
-- **UDP 出口证明**（§2.5）：同网判定和 UDP 打洞目标都改用服务端看到的、控制端证明过的 UDP 地址，不再拿 TCP 来源 IP 去凑。这是维护者对 P-2 定的原则（不假定任何运行环境）落到协议上的做法，03 块的局域网候选靠它判同网。
+- **UDP 出口证明**（§2.5）：同网判定和 UDP 打洞目标都改用服务端看到的、控制端证明过的 UDP 地址，不再拿 TCP 来源 IP 去凑。这是 P-2 的原则（不假定任何运行环境）落到协议上的做法，03 块的局域网候选靠它判同网。
 - **NAT 类型判断**：被控端看到任一端是 `SYMMETRIC` 就对 IPv4 直接走中继（`src/rendezvous_mediator.rs` `handle_punch_hole` L1098~1101 的 `relay_v4`）。NAT 类型是用 TCP 测的（`src/common.rs` `test_nat_type_`，L706）。开 TUN 时 TCP 由本机代理终结、再由出站重新建连，来源端口由代理决定，很可能测成 `SYMMETRIC`，把修好的 UDP 打洞也拦掉（§4.1、§8 P-3）。
 - **开 TUN 时的 IPv6 直连**（笔记 05 §6 第 3 项，本块认领）：默认开已在第二期做了；本块让 IPv6 打洞绑物理网卡的全局 IPv6，开不开 TUN 都按同一条规则走（§4.4）。不依赖服务端有 IPv6。
 - **WebRTC/ICE**：只立一个有时间上限的评估项（§3.6），不实现。
@@ -140,7 +140,7 @@ message PunchHoleSent {
 
 #### 2.5.1 为什么要它
 
-维护者对 P-2 定的原则（README §1.1）：规则必须对所有运行环境都成立，要么不管开不开 TUN 都生效，要么能判清楚到底有没有开 TUN；不接受"要用户配环境规则"，也不接受"按设备主人、地址簿授权"。
+P-2 的原则（README §1.1）：规则必须对所有运行环境都成立，要么不管开不开 TUN 都生效，要么能判清楚到底有没有开 TUN；不接受"要用户配环境规则"，也不接受"按设备主人、地址簿授权"。
 
 同网判定失真的根因是服务端拿两种协议的观测去比：发起方打洞请求的 TCP 来源 IP，对被控端 UDP 注册的来源 IP。透明代理只代理 TCP 时，前者是代理出口、后者是家宽，判成"不同网"。改法是比同一种协议的观测：发起方 UDP NAT 测试的来源 IP，对被控端 UDP 注册的来源 IP，并且让发起方证明它确实在那个 UDP 地址上收得到包（伪造源地址的人收不到）。这条规则只用服务端看得见的事实，本机开没开 TUN、路由器怎么代理，算法都一样。
 
@@ -369,14 +369,14 @@ pub fn open(token: &[u8], now: u64) -> Option<SocketAddr>;
 - §8 `outcome` 全集和回落率公式加 `direct_udp`、`direct_udp_or_v6`；`reply` 加 `punch_hole_sent_udp`。
 - §14 `stats` 的说明补"分项列出 `direct_udp`、`direct_udp_or_v6`"。
 
-`docs/architecture.md`（P-1 已定"进"）：
+`docs/architecture.md`（P-1 定为"进"）：
 
 - §3.8"决定"和"UDP 打洞修不修看数据"：改为"第三期先修前置障碍（服务端在 UDP 上回 TestNat、nonce 校验的 UDP `PunchHoleSent`、转发 `udp_port`/`is_udp`），再看回落率决定要不要做更重的打洞手段"，补一句"第一期以来的数据里 UDP 打洞为零"；再补一句"同网判定和 UDP 打洞目标比同一种协议的观测：控制端用服务端签发的 token 证明自己在哪个 UDP 地址上收得到包（UDP 出口证明），不要求用户配置代理规则"。
 - §5 第三期第二条："UDP 打洞：修前置障碍（加防伪造随机数和 UDP 出口证明，§3.8）"。
 - §6 第 5 条（随机数方案没细化）：改为"随机数方案和 UDP 出口证明见第三期实施契约第 4 块"。
-- §7 第 7 条：补"2026-10-23 改定：第三期先修 UDP 打洞的前置障碍"。
+- §7 第 7 条：补一句"第三期先修 UDP 打洞的前置障碍"。
 
-### 3.6 WebRTC/ICE 评估项（笔记 05 §6 第 7 项，按推荐放进第三期，不是实现）
+### 3.6 WebRTC/ICE 评估项（笔记 05 §6 第 7 项，放进第三期，不是实现）
 
 **为什么值得评估**：UU 两次局域网会话的直连全部来自上游 libwebrtc 的标准 ICE 能力（多网卡 host 候选、IPv6 host 对、对端反射候选、持续收集），网易的增强打洞一项都没起作用【实测：解密日志，笔记 05 §3.2、§6 第 7 项】。上游 RustDesk 已经带了一条 WebRTC 路径。**如果评估通过，第四期可以用 ICE 替代 Leapgate 自写的局域网多候选和 IPv6 打洞**（03 块和本块 §4.4 的那部分），而不只是补充。它也是补 §2.5.8 剩余缺口的办法：ICE 由客户端自己对候选逐对实测，不靠服务端判同网，两边的 UDP 被不同代理出口带走时，局域网那一对照样能通。
 
@@ -386,9 +386,9 @@ pub fn open(token: &[u8], now: u64) -> Option<SocketAddr>;
   2. leapgate-server 要改什么：转发 `PunchHoleRequest.webrtc_sdp_offer` → `PunchHole`、`PunchHoleSent.webrtc_sdp_answer` → `PunchHoleResponse`；双向转发 `IceCandidate`。要查清的难点：控制端收到 `PunchHoleResponse` 后还要用同一条 TCP 连接收后续候选，而现在 `send_to_tcp`（L1264）发完就把这条连接从 `tcp_punch` 里取走；被控端经 UDP 发来的 `IceCandidate` 怎么防伪造（`session_key` 能不能当凭证）；带 offer 的 `PunchHole` 经 UDP 发给被控端的大小。
   3. STUN/TURN：webrtc.rs 默认 4 个第三方 STUN（第二期待定项）。要不要在 leapgate-server 的 UDP 端口上回 STUN Binding（几十行）；TURN 和 hbbr 功能重叠，要不要。UU 的 STUN/TURN 只有 IPv4，IPv6 只靠 host 候选也够用（笔记 05 §1）。
   4. 在"路由器透明代理只代理 TCP + 本机开 TUN"下的预期：host 候选含物理网卡和 TUN 网卡地址，局域网那对靠连通性检查就能通，不依赖服务端同网判定；经 TUN 的 STUN 在代理规则直连时拿到真实映射（笔记 05 §4）。实测核对，包括两台的 UDP 走不同代理出口的情况（§2.5.8）。
-- **做法**：在 leapgate-server 的临时分支上做最少的信令转发（不合并、不审查），两台 Leapgate Windows 客户端打开 `enable-webrtc`，在维护者网络里测三种场景（同一局域网两端都开 TUN，其中一组让两台的 UDP 走不同代理出口；外网连回家；家里连外网），每种 10 次，记成功率、建连耗时、最终候选对类型；再做 50 次连接/断开，看崩溃、卡住、泄漏。
+- **做法**：在 leapgate-server 的临时分支上做最少的信令转发（不合并），两台 Leapgate Windows 客户端打开 `enable-webrtc`，在目标网络环境里测三种场景（同一局域网两端都开 TUN，其中一组让两台的 UDP 走不同代理出口；外网连回家；家里连外网），每种 10 次，记成功率、建连耗时、最终候选对类型；再做 50 次连接/断开，看崩溃、卡住、泄漏。
 - **产出**：`docs/research/第三期/06-WebRTC评估.md`：成熟度结论、leapgate-server 改动清单和工作量、实测表、建议。
-- **时长**：3 个工作日（读码和上游历史 1 天、临时转发 1 天、实测和结论 1 天）。本块服务端合入之后做，方便和 KCP-UDP 打洞对比。
+- **时长**：3 个工作日（读码和上游历史 1 天、临时转发 1 天、实测和结论 1 天）。本块服务端实现之后做，方便和 KCP-UDP 打洞对比。
 - **进第四期的条件**（同时满足）：(a) 至少一种场景里 WebRTC 能直连，而 KCP-UDP 打洞加局域网多候选、IPv6 打洞不能（包括 §2.5.8 的场景），或者建连明显更快、换网不断；(b) 50 次循环无崩溃、无卡死；(c) 服务端改动（含防伪造）估计不超过一周。任一不满足就不做，等上游把 WebRTC 设为自建服务器默认开再看。
 
 ## 4. 客户端改动（leapgate-client）
@@ -414,7 +414,7 @@ pub fn take_udp_token(socket: Option<&Arc<UdpSocket>>) -> Vec<u8>;
 pub fn udp_target(peer_addr: &mut SocketAddr, leapgate_udp_addr: &[u8]);
 
 /// handle_punch_hole 的 relay_v4 覆盖：leapgate-server 发了 nonce、控制端有 UDP 映射端口、
-/// 本地没有代理/强制中继时，UDP 打洞试了再说，不看 TCP 测出的 NAT 类型（P-3 按推荐 A）。
+/// 本地没有代理/强制中继时，UDP 打洞试了再说，不看 TCP 测出的 NAT 类型（P-3 选 A）。
 pub fn relay_v4(upstream: bool, relay: bool, ph: &PunchHole) -> bool {
     upstream && !(ph.udp_port > 0 && !ph.leapgate_nonce.is_empty() && !relay)
 }
@@ -425,7 +425,7 @@ pub fn relay_v4(upstream: bool, relay: bool, ph: &PunchHole) -> bool {
 - 只有带 UDP 的那条打洞请求带 token：只做 TCP 打洞的后备请求 `udp` 是 `(None, None)`，`take_udp_token(None)` 返回空（§2.5.6）。
 - **`udp_target`**：解不出就保持原值，等于上游写法。
 
-为什么 P-3 按推荐 A（维护者没有偏好）：UU 日志显示开 TUN 时 UDP 的反射地址就是家宽出口，TUN 在代理规则直连时不破坏 UDP 打洞【实测：解密日志，笔记 05 §4】；而 TCP 在 TUN 下由本机代理终结、再由出站重新建连（笔记 04 §3.3、笔记 05 §5 第 3 行），同一本地端口连两个服务端端口时看到的来源端口由代理决定，用 TCP 测 NAT 类型会误判成对称。"会测成 `SYMMETRIC`"仍待被控端服务进程日志的 `Tested nat type` 核实（笔记 05 §7 第 6 项，§6.3 第 6 条）。
+为什么 P-3 选 A：UU 日志显示开 TUN 时 UDP 的反射地址就是家宽出口，TUN 在代理规则直连时不破坏 UDP 打洞【实测：解密日志，笔记 05 §4】；而 TCP 在 TUN 下由本机代理终结、再由出站重新建连（笔记 04 §3.3、笔记 05 §5 第 3 行），同一本地端口连两个服务端端口时看到的来源端口由代理决定，用 TCP 测 NAT 类型会误判成对称。"会测成 `SYMMETRIC`"仍待被控端服务进程日志的 `Tested nat type` 核实（笔记 05 §7 第 6 项，§6.3 第 6 条）。
 
 ### 4.2 `libs/leapgate/src/options.rs` `self_hosted_punch_default`
 
@@ -454,7 +454,7 @@ pub fn relay_v4(upstream: bool, relay: bool, ph: &PunchHole) -> bool {
 
 ### 4.4 开 TUN 时的 IPv6 直连：绑物理网卡的全局 IPv6（笔记 05 §6 第 3 项）
 
-IPv6 是 CGNAT 家宽回家最主要的直连路，维护者的机器都开 TUN。UU 的 IPv6 也只靠 host 候选、没有 IPv6 STUN（笔记 05 §1），和 Leapgate 的 IPv6 打洞同一类，所以关键是本机能不能拿到、并且用上物理网卡的全局 IPv6。
+IPv6 是 CGNAT 家宽回家最主要的直连路，而目标环境里的机器都开 TUN。UU 的 IPv6 也只靠 host 候选、没有 IPv6 STUN（笔记 05 §1），和 Leapgate 的 IPv6 打洞同一类，所以关键是本机能不能拿到、并且用上物理网卡的全局 IPv6。
 
 - **现状**【读码】：`src/common.rs` `test_ipv6`（L2762）先用 `test_bind_ipv6`（L2749，`connect` 一个全局地址让内核选源地址）取本机地址，只收 `2000::/3`（L2777~2794），日志 `Found public IPv6 address locally`；再后台问 STUN（L2825~2850），结果覆盖前者，日志 `Found public IPv6 address via STUN server`。打洞 socket 由 `get_ipv6_socket`（L2980）绑在这个地址上，绑不上时日志 `Failed to create UDP socket for IPv6`。
 - **问题**【推测】：TUN 接管 IPv6 默认路由时，`test_bind_ipv6` 选出的是 TUN 的地址（通常是 ULA），被过滤掉；STUN 也经 TUN 走，被代理出去时拿到的是代理出口地址（绑不上），或者干脆失败。结果取决于代理规则，违反"不假定运行环境"。
@@ -527,7 +527,7 @@ IPv6 是 CGNAT 家宽回家最主要的直连路，维护者的机器都开 TUN�
 - 服务端在测试机上跑 release 版，用一个最小的 UDP 脚本（或 Rust 测试二进制）走完"带填充的 UDP TestNat（收到 token）→ TCP 打洞请求带 token → 假被控端从另一个 UDP socket 回带 nonce 的 `PunchHoleSent`"，确认被控端收到的 `PunchHole.leapgate_udp_addr` 是 TestNat 那个 socket 的地址、控制端 TCP 上收到 `is_udp` 的响应。能造出两个来源 IP 时（例如测试机的回环地址和公网地址各走一路），顺带核对 TCP、UDP 来源不同时服务端发给被控端的是 `FetchLocalAddr`。
 - Windows 客户端构建通过（`scripts/windows/build-client.ps1`）。
 
-### 6.3 端到端验收（维护者）
+### 6.3 端到端验收
 
 前提：两台装了 Leapgate 的 Windows，都开 TUN 代理，**不配任何代理规则**（Leapgate 不要求配置，README §5）。第 1~6 条测 UDP 打洞本身，需要两端到会合服务器的 UDP 拿到真实映射：TUN 把会合服务器的 UDP 交给代理时，打洞打到代理出口、回落中继（§9 第 1 条），这时验收临时关 TUN，或把会合服务器的 UDP 设成直连（可选优化，不是使用前提）；第 9 条专测不配规则时的自动降级。除第 2 条外，第 1~6 条为了单看 IPv4 UDP 打洞，控制端临时关掉"Enable IPv6 P2P connection"。
 
@@ -554,16 +554,16 @@ IPv6 是 CGNAT 家宽回家最主要的直连路，维护者的机器都开 TUN�
 - WebRTC 信令转发的正式实现（只做 §3.6 的评估）。
 - "先走中继、后台升级直连"和会话中换路径（第 8 项，第四期以后）。
 
-## 8. 维护者的决定
+## 8. 决定
 
 全局清单见 README.md §1.1。
 
-- **P-1 已定（2026-10-23）：UDP 打洞的前置障碍进第三期**（改架构 §3.8"看回落率再定"）。理由：不修这四道障碍，UDP 打洞根本不运行，"看回落率再定"永远得不到有用的数据；UU 日志里家宽 NAT 判为 Cone、同出口回环能通，普通的反射地址打洞在这类网络里大概率够用，端口预测这类手段继续排最后（笔记 05 §4、§6"日志带来的变化"）。架构文档按 §3.5 改。
-- **P-3：维护者没有偏好，按推荐 A**：不测，试了再说。被控端拿到 leapgate-server 的 nonce、控制端有 UDP 映射端口时，不看 NAT 类型直接 UDP 打洞（H-a，2 行）。依据见 §4.1。代价：真是对称 NAT 时白试一次，控制端在对端报 `SYMMETRIC` 时的直连超时是 1 秒（`connect` 里的 `MIN`），最多晚约 1 秒回落中继。备选 B（用 UDP 向 21116、21115 各测一次，服务端多监听一个 UDP 端口）和 C（不改，开 TUN 的机器 IPv4 永远不做 UDP 打洞）不做。
-- **P-2：维护者定了原则**（规则对所有运行环境都成立，不要用户配规则，不按身份授权）。本块按它新拟了 §2.5 的 UDP 出口证明，开 TUN 时的 IPv6 也照同一原则改成正文直接做（§4.4）。**§2.5 的机制待维护者确认。**
+- **P-1：UDP 打洞的前置障碍进第三期**（改架构 §3.8"看回落率再定"）。理由：不修这四道障碍，UDP 打洞根本不运行，"看回落率再定"永远得不到有用的数据；UU 日志里家宽 NAT 判为 Cone、同出口回环能通，普通的反射地址打洞在这类网络里大概率够用，端口预测这类手段继续排最后（笔记 05 §4、§6"日志带来的变化"）。架构文档按 §3.5 改。
+- **P-3：选 A**：不测，试了再说。被控端拿到 leapgate-server 的 nonce、控制端有 UDP 映射端口时，不看 NAT 类型直接 UDP 打洞（H-a，2 行）。依据见 §4.1。代价：真是对称 NAT 时白试一次，控制端在对端报 `SYMMETRIC` 时的直连超时是 1 秒（`connect` 里的 `MIN`），最多晚约 1 秒回落中继。备选 B（用 UDP 向 21116、21115 各测一次，服务端多监听一个 UDP 端口）和 C（不改，开 TUN 的机器 IPv4 永远不做 UDP 打洞）不做。
+- **P-2：定的是原则**（规则对所有运行环境都成立，不要用户配规则，不按身份授权）。本块按它新拟了 §2.5 的 UDP 出口证明，开 TUN 时的 IPv6 也照同一原则改成正文直接做（§4.4）。
 
-**不回复即按推荐**（属于本块的）：
-- WebRTC/ICE 评估放进第三期：本块服务端合入后做 3 个工作日，只产出评估记录，不实现（§3.6）。
+**其余**（属于本块的）：
+- WebRTC/ICE 评估放进第三期：本块服务端实现后做 3 个工作日，只产出评估记录，不实现（§3.6）。
 
 ## 9. 已知限制和风险
 

@@ -1,10 +1,10 @@
-第三期实施契约 · 第 5 块，总述和维护者的决定见 README.md。状态：维护者 2026-10-24 确认；2026-10-25 已实施并合入 main（leapgate-server `d564e30`、leapgate-client `753c9e7e7`；两边各经三路审查和两轮复核，测试机 netns 真实 NAT 测试 6 组 × 3 次全部符合，§6.3），待维护者端到端（§6.4）。方向问题 Q1~Q9 和起草中提出的 P-A、P-B 都已由维护者拍板（AGENTS.md 2026-10-24"自研 ICE 的决定"一条，P-A、P-B 按推荐）；实施中又定了 F1、F2（§1）。本文已于 2026-10-25 按最终实现同步：实现和原稿不同的地方直接改在对应节里，必要时注明原因。同日跨网验收之后又补了控制端"输给中继窗口"的日志（§4.12，leapgate-client `e321ccf9e`，2026-10-26 合入 main `3899f91b1`），并改了 §6.4 的分类和第 8 步的取消做法，§9 加了第 24、25 条。2026-10-28 补了被控端会话期间的 KCP 静默关闭（§2.11、§4.8.2 第 7 条、§4.12、§9 第 26 条，leapgate-client 合入 main 时的提交见总仓库的子模块指针）。
+第三期实施契约 · 第 5 块，总述和决定见 README.md。方向问题 Q1~Q9 和起草中提出的 P-A、P-B 的决定见 README §1.3，实施中又加了 F1、F2（§1）。本文按最终实现写：实现和原稿不同的地方直接改在对应节里，必要时注明原因。测试机上 netns 真实 NAT 测试 6 组 × 3 次全部符合（§6.3）。
 
 # 自研 ICE：host 与 srflx 候选、独立信令、STUN 连通性检查、KCP 交接
 
 > 标注：【读码】读过现版源码；【推测】推断，没有实测；【待实测】只能靠实测回答；【实测】笔记 06 §9 的实测结果；【计算】按格式手算或用脚本独立算出；【官方】一手文档，写明查证日期。
 > 读码基线：leapgate-client main `648eab0a0`（之后的 `c2e83a732` 只在 `src/leapgate_hooks.rs` 末尾追加了单元测试，本文引用的行号不受影响）、leapgate-server main `08a41fa`、leapgate-cardo 客户端线 `eee588e`（分支 `leapgate/client`）、服务端线 `a80c99e`（分支 `leapgate/server`）。两条 cardo 线的 `protos/rendezvous.proto` 逐字节相同，文中 proto 行号对两条线都成立。第三方代码按两份 `Cargo.lock` 钉的版本读：`sodiumoxide 0.2.7`（自带 libsodium 1.0.18）、`stun_codec 0.3.5`、`bytecodec 0.4.15`、`windows 0.61.1`、kcp-sys `938eda3`。
-> 依据：笔记 07（`docs/research/第三期/07-Porta自研ICE设计.md`，设计底稿）、笔记 06 §9（`06-WebRTC评估.md` 的实测结果和结论）。笔记 07 是改名前写的，读码基线和名字都已过时，也有几处被维护者的决定推翻（Q5、Q6）；**本文和笔记 07 冲突时以本文为准**，本文的代码事实都按上面的基线重新核对过。读码过程不复述，只引用节号。
+> 依据：笔记 07（`docs/research/第三期/07-Porta自研ICE设计.md`，设计底稿）、笔记 06 §9（`06-WebRTC评估.md` 的实测结果和结论）。笔记 07 是改名前写的，读码基线和名字都已过时，也有几处被后来的决定推翻（Q5、Q6）；**本文和笔记 07 冲突时以本文为准**，本文的代码事实都按上面的基线重新核对过。读码过程不复述，只引用节号。
 
 **术语**（第一次出现时解释，后文直接用）：
 - **A、B、S**：A 是控制端（发起连接的一方，ICE 里固定当 controlling），B 是被控端（固定当 controlled），S 是 leapgate-server。
@@ -28,7 +28,7 @@
 
 它要补的是现有路径做不到、笔记 06 §9.2 实测 ICE 能做到的几种情况：同一局域网但 S 判不出同网（路由器透明代理只代理 TCP、两端 UDP 走不同代理出口，S2 3/3【实测】）；IPv4 跨网打洞（S3 4/4【实测】，上游 UDP 打洞从没运行过，契约 04 §1）；家宽 CGNAT 没有公网 IPv4、经全局 IPv6 互连（S4 2/3【实测】，失败那次是 Windows 10054，本文的 socket 规则专门对付它）。
 
-**维护者的决定**（2026-10-24，笔记 07 §9；AGENTS.md 已记）。加粗的三条和笔记 07 **不同**：Q5、Q6 和笔记 07 §9 的推荐相反，P-A 把笔记 07 放在第三步的"赢家上报"提前进了 MVP。笔记 07 里与之冲突的写法一律作废（逐项对照见 §11）：
+**决定**（笔记 07 §9；README §1.3）。加粗的三条和笔记 07 **不同**：Q5、Q6 和笔记 07 §9 的推荐相反，P-A 把笔记 07 放在第三步的"赢家上报"提前进了 MVP。笔记 07 里与之冲突的写法一律作废（逐项对照见 §11）：
 
 | 项 | 决定 | 本文落在哪 |
 |---|---|---|
@@ -41,14 +41,14 @@
 | Q7 | MVP 私网 IPv4 优先于 IPv6，有了续选再改 | §2.10 |
 | Q8 | Tailscale、ZeroTier、WireGuard 这类 VPN 网卡和 TUN 都不收集 | §4 |
 | Q9 | 不用定：开 TUN 时绑物理网卡地址的 socket 发往公网仍走物理网卡（S3【实测】）。但"每个候选 socket 关掉 `SIO_UDP_CONNRESET`、接收循环遇错不退出、不收集 TUN/VPN 候选"是**必须**（笔记 06 §9.3）；默认开着 Windows 防火墙时的行为没测过，放进 MVP 验收 | §4、§6 |
-| **P-A**（起草中提出，按推荐定） | **A 在信令连接上补报一条 RESULT**（选中对的类型、地址族、用时或失败原因；不认证，只作统计），S 按 session 记进新表（迁移 0006），不和 `conn_attempt` 按 IP 硬合并。理由：ICE 胜出时 `conn_attempt` 照样记成 `relay`/`direct_tcp`，不补报的话中继回落率会失真。备选和代价见 §8 | §2.3、§3.7 |
-| P-B（起草中提出，按推荐定） | 加密 FORWARD 复用 B 已锁定的 Ed25519 设备密钥转成 X25519（`sodiumoxide` 的 `to_curve25519_pk/sk` + sealed box），不另生成密钥。libsodium 允许，但建议条件允许时签名和加密分开用两把，记为已知取舍。备选见 §8 | §2.5 |
-| F1（实施审查中提出，维护者 2026-10-25 定） | 会合服务器是域名时，客户端先问物理网卡自己的 DNS 服务器（从这块网卡的地址发出），拿不到地址才退回系统解析，两边的答案都去掉 §2.7"丢弃"类地址。原因：mihomo/Clash 的 TUN 开 fake-ip 时，系统解析给的是 `198.18/15` 的假地址，从物理网卡 socket 发过去永远没有回包，两端都拿不到 srflx（维护者本机实测）。不判断有没有开 TUN，所有环境同一套规则。代价见 §9 第 22 条 | §4.3、§4.7、§9 |
-| F2（实施审查中提出，维护者 2026-10-25 定） | ICE 不新增开关，但跟随上游现有的两个打洞开关：控制端 `enable-udp-punch`、`enable-ipv6-punch` 都关时不做 ICE。原因：两个都关说明用户不要 UDP 直连，原稿让 ICE 照样建 UDP 直连、胜出后还不回落 | §4.8.1、§7 |
+| **P-A**（起草中提出） | **A 在信令连接上补报一条 RESULT**（选中对的类型、地址族、用时或失败原因；不认证，只作统计），S 按 session 记进新表（迁移 0006），不和 `conn_attempt` 按 IP 硬合并。理由：ICE 胜出时 `conn_attempt` 照样记成 `relay`/`direct_tcp`，不补报的话中继回落率会失真。备选和代价见 §8 | §2.3、§3.7 |
+| P-B（起草中提出） | 加密 FORWARD 复用 B 已锁定的 Ed25519 设备密钥转成 X25519（`sodiumoxide` 的 `to_curve25519_pk/sk` + sealed box），不另生成密钥。libsodium 允许，但建议条件允许时签名和加密分开用两把，记为已知取舍。备选见 §8 | §2.5 |
+| F1（实施中提出） | 会合服务器是域名时，客户端先问物理网卡自己的 DNS 服务器（从这块网卡的地址发出），拿不到地址才退回系统解析，两边的答案都去掉 §2.7"丢弃"类地址。原因：mihomo/Clash 的 TUN 开 fake-ip 时，系统解析给的是 `198.18/15` 的假地址，从物理网卡 socket 发过去永远没有回包，两端都拿不到 srflx（在开 fake-ip TUN 的 Windows 上实测）。不判断有没有开 TUN，所有环境同一套规则。代价见 §9 第 22 条 | §4.3、§4.7、§9 |
+| F2（实施中提出） | ICE 不新增开关，但跟随上游现有的两个打洞开关：控制端 `enable-udp-punch`、`enable-ipv6-punch` 都关时不做 ICE。原因：两个都关说明用户不要 UDP 直连，原稿让 ICE 照样建 UDP 直连、胜出后还不回落 | §4.8.1、§7 |
 
-**维护者原则**（2026-10-23，适用整份契约）：兼容性要考虑全面，不能假定任何运行环境，规则必须对所有环境都适用；不接受要用户配代理规则，不接受按设备主人或授权判同网。本块的落法：所有环境用**同一套规则**（只收物理网卡、两端逐对实测、强制中继时不做），没有任何一条按"是否开 TUN""是否同网""是否授权"切换行为；ICE 根本不做同网判定。
+**兼容性原则**（README §1.1 P-2，适用整份契约）：兼容性要考虑全面，不能假定任何运行环境，规则必须对所有环境都适用；不接受要用户配代理规则，不接受按设备主人或授权判同网。本块的落法：所有环境用**同一套规则**（只收物理网卡、两端逐对实测、强制中继时不做），没有任何一条按"是否开 TUN""是否同网""是否授权"切换行为；ICE 根本不做同网判定。
 
-**本块已定的实现取舍**（主会话 2026-10-24 定，不再列为待定；这里只列结论，规则和读码依据以括号里的正文各节为准）：
+**本块的实现取舍**（这里只列结论，规则和读码依据以括号里的正文各节为准）：
 1. 控制端竞速自己写，不用上游 `race_transports_prefer_webrtc`：ICE 直连立即胜出，上游直连也立即胜出，上游先给中继时最多压一个窗口（和上游取同一个用户选项 `relay-fallback-delay`，`leapgate_hooks` 照抄解析，不改上游可见性）；**ICE 失败一律不对外报错，返回上游自己的结果和错误文本**；笔记 07 的 H-2 删掉（§4.8.1）。
 2. ICE 腿只在"普通路径"上启用：不是 `id@server?key=`、直连 IP 或 `域名:端口`、只允许入站、强制中继（含 `/r`、代理、WebSocket）、`disable-udp`，两个打洞开关至少开一个（F2），有可信 Key，能力缓存含 `ice`；连接类型不特判，端口转发、RDP 也走 ICE（§4.8.1）。
 3. 被控端两种 mediator 收到的 FORWARD 都处理；B 开了代理、WebSocket、`disable-udp` 或配了 IP 白名单时回 `REJECT{UNSUPPORTED}`；挂钩必须 `tokio::spawn`，不能用 `?`（§4.8.2）。
@@ -60,11 +60,11 @@
 9. 检查报文自己校验 MESSAGE-INTEGRITY、常数时间比较；MESSAGE-INTEGRITY、FINGERPRINT 各恰好一个，前者之后只许有后者；不认识的属性一律丢弃；每个数据报新建解码器；随机字节输入不 panic（§2.9.2、§2.9.4）。
 10. 和 KCP 的交接：Leapgate 生成的事务号偏移 12 恒为 0；B 按 SYN 的位模式识别 KCP 的第一个包，不是"第一个不是 STUN 的包"（§2.9.5）。
 11. 能力和版本：S 的 `features` 加 `"ice"`（常量）；B 要 `leapgate_hb` 新鲜、版本不低于 0.3.1、设备公钥已被 01 锁定（§2.12）。
-12. 网卡过滤：契约 03 §4.1 的关键字规则搬进本块，只新增 `wi-fi direct`；Hyper-V 不加关键字，改为出候选的网卡必须有默认网关（任一地址族）；`is_virtual` 变严对已合入的局域网多候选和 02 测速的影响是有意的，要求回归测试（§4.3、§4.7）。
+12. 网卡过滤：契约 03 §4.1 的关键字规则搬进本块，只新增 `wi-fi direct`；Hyper-V 不加关键字，改为出候选的网卡必须有默认网关（任一地址族）；`is_virtual` 变严对现有的局域网多候选和 02 测速的影响是有意的，要求回归测试（§4.3、§4.7）。
 13. 依赖：客户端只新增 `stun_codec`、`bytecodec` 的直接声明和 `windows` 的 `Win32_System_IO` feature，服务端只显式声明 `crc32fast`，都已在锁文件里（§3.10、§4.10）。
 14. 资源都由已有上限或本块的常数兜住（§2.11、§3.9）。
 
-**整合时定的取舍**（三段草稿之间对不上、删掉之后更简单，或第 1 轮核对发现的问题；按维护者原则和工程取舍原则定，细节在各节）：
+**其余取舍**（按兼容性原则和工程取舍原则定，细节在各节）：
 - A 收到并验过 ANSWER 之后才开始读 ICE socket，之前到达的检查留在接收缓冲里（§2.9.4）；B 先收集，收集完同时发 ANSWER、开始检查（§2.3 ③）。
 - 会话条目和 A 的信令连接同寿，S 由此分出"拿到结果"和"被竞速取消"（`abandoned`）。不设会话过期、不设全表上限：一条连接最多登记一个 session、结束时一定清掉，条目数由 21116 的 2048 条并发连接封顶；不守规矩、一直不关连接的 A 最多占住自己来源的 8 个名额。判重、判名额、插入在 `register` 的一次加锁里，只在成功时取走 sink（§2.3、§3.3.2）。
 - A、B 的信令连接（建连加密钥交换）整段套 `SIGNAL_TIMEOUT`，不用上游的两段 18 秒；A 的 `secure_connection` 套 `KCP_HANDOFF_TIMEOUT`。ICE 腿因此最长约 16 秒（§4.8.1、§9 第 20 条）。
@@ -85,14 +85,14 @@
 | 01 `sign::server_pk()`（`sign.rs` L89） | B 验 FORWARD 签名时用它取会合公钥；`Ok(None)`（没配 Key）、`Err`（配了但无效）都不做 ICE。A 验 ANSWER 里的 IdPk 不用它，用 `peer_key_verifies`（`get_rs_pk(key)`，和 `secure_connection` 同源，§2.3 ⑥） |
 | 01 时钟偏移 `sign::clock_skew(t)`（`sign.rs` L81，crate 内可见） | B 判 FORWARD 的时间窗、去重条目过期（所以 FORWARD 的校验整段放在 `libs/leapgate`，§4.6） |
 | 01 `Peer.leapgate_hb`、锁定 `Peer.pinned`（`server/src/peer.rs` L99~114） | S 判 B 支不支持 ICE、加密目标公钥是否可信。ICE 是 `leapgate_hb` 的第一个读者，去掉两处 `#[allow(dead_code)]` |
-| 01 版本号规则（契约 01 §2.3） | 0.3.1 原留给 04，现归本块；01 §2.3 那句"04 块客户端合入时前移到 0.3.1……第三期只前移这两次"已于 2026-10-24 改成归 05（`ICE_MIN_LEAPGATE_VER` 取 0.3.1） |
+| 01 版本号规则（契约 01 §2.3） | 0.3.1 原留给 04，现归本块（`ICE_MIN_LEAPGATE_VER` 取 0.3.1，01 §2.3） |
 | 02 `lan.rs` 双地址族枚举（`AF_UNSPEC`、`Nic.ipv6`、`is_physical(IpAddr)`、`physical_snapshot`） | 直接用；02 没做的部分（契约 03 §4.1 的描述关键字、`has_gateway_v4/v6`、地址分类，加上 ICE 另要的 IPv6 地址属性和网络代价）由本块补（§4.7） |
 
 **分期**（笔记 07 §7.1 的三步，按 Q5、P-A 重排）：MVP 是笔记 07 原来的第一、二步合在一起，就是本契约（验收含测试机 netns + nftables 真实 NAT 集成测试、在开着默认 Windows 防火墙的机器上重测、和 `is` 0.11 的一次性差分对照）；第三步（完整版）另起契约，内容见 §7 第一条；04 §4.4 可选，不排期。
 
-**实施顺序**（README §2 新增的 D 步）：先做只含 proto 的提交（§2.2），两条 cardo 线各一份；然后服务端、客户端并行（不同仓库）。依赖 01 的能力缓存、心跳签名机制和 `leapgate_hb`、02 的 `lan.rs` 双地址族（都已合入）。迁移 0006 归本块（P-A），在 02 的 0005 之后。和 03 的"默认 ID 加盐"无依赖、可并行。
+**实施顺序**（README §2 新增的 D 步）：先做只含 proto 的提交（§2.2），两条 cardo 线各一份；然后服务端、客户端并行（不同仓库）。依赖 01 的能力缓存、心跳签名机制和 `leapgate_hb`、02 的 `lan.rs` 双地址族。迁移 0006 归本块（P-A），在 02 的 0005 之后。和 03 的"默认 ID 加盐"无依赖、可并行。
 
-**工作量**：coder 约 20 人天（区间 18.5~22.5）【推测】，维护者端到端约 1.5 天；明细、比笔记 07 多出来的部分和实际情况见 §10。
+**工作量**：实现约 20 人天（区间 18.5~22.5）【推测】，端到端约 1.5 天；明细和比笔记 07 多出来的部分见 §10。
 
 **不在本块**：见 §7；另外 03 的默认 ID 加盐是另一块。
 
@@ -256,7 +256,7 @@ message LeapgateIce {
 
 ### 2.3 各段消息和处理
 
-所有 `LeapgateIce` 一律要求 `ver == 1`。不合时各方的处理（实施时补定，原稿只写了"不合规"）：S 收到的 OFFER 回 `REJECT{BAD}`；ANSWER 按不合规处理，给 A 发 `REJECT{BAD}` 并删掉这条 session；B 的 REJECT 忽略、断开 B 的连接；RESULT 忽略、A 的连接保持；A 收到的 ANSWER 按 `BAD_ANSWER`；B 收到的 FORWARD 静默丢弃（§2.5 第 1 步）。S 只在**已完成密钥交换的 21116 TCP 连接**上处理 `offer`、`answer`、`reject`、`result`：WebSocket 连接（21118，不做密钥交换）和明文 TCP 连接上收到任何 `LeapgateIce` 都不回包、直接断开；21116/UDP 上收到的 `LeapgateIce` 丢掉。Leapgate 客户端只会经 `secure_tcp_required` 建好的连接发它，所以这条只挡不按协议来的发送方。
+所有 `LeapgateIce` 一律要求 `ver == 1`。不合时各方的处理：S 收到的 OFFER 回 `REJECT{BAD}`；ANSWER 按不合规处理，给 A 发 `REJECT{BAD}` 并删掉这条 session；B 的 REJECT 忽略、断开 B 的连接；RESULT 忽略、A 的连接保持；A 收到的 ANSWER 按 `BAD_ANSWER`；B 收到的 FORWARD 静默丢弃（§2.5 第 1 步）。S 只在**已完成密钥交换的 21116 TCP 连接**上处理 `offer`、`answer`、`reject`、`result`：WebSocket 连接（21118，不做密钥交换）和明文 TCP 连接上收到任何 `LeapgateIce` 都不回包、直接断开；21116/UDP 上收到的 `LeapgateIce` 丢掉。Leapgate 客户端只会经 `secure_tcp_required` 建好的连接发它，所以这条只挡不按协议来的发送方。
 
 **① A → S：`offer`**（A 新开的信令连接上的第一条消息）
 
@@ -402,7 +402,7 @@ FORWARD = LeapgateIce { ver: 1, forward { ts, sealed, sig } }
 - B：自己的私钥转换不会失败；自己的公钥是 libsodium 生成的合法点，`to_curve25519_pk` 也不会失败。真遇到 `Err` 就按第 5 步失败处理（丢弃）。
 - B 的公钥和 S 记的不一致（B 重置了配置、换了密钥，S 还没收到新的 `RegisterPk`；锁定后 S 也不会接受新公钥）：解不开，这一次 ICE 失败、回落其他路径，不需要特殊处理。
 
-**已知取舍（P-B）**：B 的同一把 Ed25519 设备私钥现在既签 Leapgate 请求（`leapgate-device-v1` 前缀）、签上游 `SignedId`，又经转换用来解密 FORWARD。libsodium 提供这个转换，但原话是"If you can afford it, using distinct keys for signing and for encryption is still highly recommended"【官方：https://doc.libsodium.org/advanced/ed25519-curve25519 ，2026-10-24 查】；Thormarker 2021 证明了 Ed25519 和一个 X25519 KEM 共用一把密钥是安全的（https://eprint.iacr.org/2021/509），sealed box 的密钥派生和论文里的构造不同，严格说只能类推。维护者按推荐选了复用：零新状态、不加 proto 字段、不加存储；AGENTS.md 已定"不做公钥轮换、私钥加密存放"。备选（另生成一对 X25519 密钥、在已签名的心跳里上报、S 存进 Peer）留到退出兼容前和会合层签名一起再看。
+**已知取舍（P-B）**：B 的同一把 Ed25519 设备私钥现在既签 Leapgate 请求（`leapgate-device-v1` 前缀）、签上游 `SignedId`，又经转换用来解密 FORWARD。libsodium 提供这个转换，但原话是"If you can afford it, using distinct keys for signing and for encryption is still highly recommended"【官方：https://doc.libsodium.org/advanced/ed25519-curve25519 ，2026-10-24 查】；Thormarker 2021 证明了 Ed25519 和一个 X25519 KEM 共用一把密钥是安全的（https://eprint.iacr.org/2021/509），sealed box 的密钥派生和论文里的构造不同，严格说只能类推。选了复用：零新状态、不加 proto 字段、不加存储；已定方向里"不做公钥轮换、私钥加密存放"（README §7）。备选（另生成一对 X25519 密钥、在已签名的心跳里上报、S 存进 Peer）留到退出兼容前和会合层签名一起再看。
 
 **测试向量**（两端各自的单测都要过；用 Python `cryptography` 49.0 / PyNaCl 1.6.2 独立算出【计算】，脚本思路同契约 01 的共享向量）：
 - 种子沿用契约 01：设备种子 `[7; 32]`，会合私钥种子 `[9; 32]`。设备公钥 `ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c`，会合公钥 `fd1724385aa0c75b64fb78cd602fa1d991fdebf76b13c58ed702eac835e9f618`，设备公钥转成的 X25519 公钥 `761d88ec830413919dfe9d4d1d56f17e653c8c994082df5b137b90a0ae6edf74`。
@@ -486,7 +486,7 @@ S 侧的常量、`seal`/`open` 的签名和 `open` 的检查顺序见 §3.2.2（
 4. 伪造证明要有 S 内存里的密钥，MAC 截到 16 字节（128 位），猜不出。
 5. 不当放大器：见 §2.9.3。
 
-为什么公网 IPv4 必须带证明：不带的话，任何人都能在 OFFER 里写一个第三方的公网地址，让 B 往那里发检查（RFC 8445 §19.5.1 说的"voice hammer"）；证明只能来自 S 30 秒内亲眼看到、并且对方真收到了回包的地址，和契约 04 §2.4 否掉"控制端自报 UDP 地址"的理由一致。全局 IPv6 不带证明的每条消息最多 2 个，和上游 IPv6 打洞本来就转发控制端自报的 IPv6 同一档；私网 IPv4、ULA 只会把包发进收方自己的局域网，和已合入的局域网多候选同一类。
+为什么公网 IPv4 必须带证明：不带的话，任何人都能在 OFFER 里写一个第三方的公网地址，让 B 往那里发检查（RFC 8445 §19.5.1 说的"voice hammer"）；证明只能来自 S 30 秒内亲眼看到、并且对方真收到了回包的地址，和契约 04 §2.4 否掉"控制端自报 UDP 地址"的理由一致。全局 IPv6 不带证明的每条消息最多 2 个，和上游 IPv6 打洞本来就转发控制端自报的 IPv6 同一档；私网 IPv4、ULA 只会把包发进收方自己的局域网，和现有的局域网多候选同一类。
 
 向量（MAC 密钥用 `[5; 32]`，`ts = 1761200000`）【计算】：
 - `203.0.113.7:40000` → `0168f9c78004cb0071079c4019f16eb06b0d075a34e2cabc1d3347bd`（28 字节）
@@ -736,7 +736,7 @@ G 是 A（controlling）那一端候选的优先级，D 是 B 那一端的。两
 | `KCP_HANDOFF_TIMEOUT` | 3000 毫秒 | A 的 `KcpStream::connect`、B 的 `KcpStream::accept` 用，A 的 `secure_connection` 外面也套它；这一对已被检查证明双向通，不用上游的 18 秒（`CONNECT_TIMEOUT`、`READ_TIMEOUT`） |
 | `AGENT_TTL`（B） | 10 秒（从开始收集算，紧接在接受 FORWARD、占名额之后，差一次枚举网卡，约 5~10 毫秒；`Agent::new` 不另收接受时刻） | 覆盖 A 的 `ANSWER_WAIT` 4 秒 + `CHECK_TIMEOUT` 3 秒 + 交接；到时没等到 KCP SYN 就收摊、释放名额 |
 | `MAX_AGENTS`（B） | 8 个同时 | 进程级静态量（便携运行时和界面进程在同一个进程里）；回 REJECT 也占名额；满了静默丢弃 FORWARD，不回 `BUSY`（§4.8.2） |
-| `ICE_PEER_SILENCE_CLOSE`（B） | 20 秒（会话期间每秒看一次 `peer_silent_for()`） | 控制端在 KCP 上静默满这么久就丢守卫、关会话。比控制端 `io_loop` 的 `KCP_PEER_SILENCE_LIMIT` 8 秒长：远程桌面重连要在旧连接关闭前登录上，不然"会话结束后锁屏"会误锁；空闲的 mux 和出口隧道也不会比控制端 18 秒的读超时更早断开。2026-10-28 加，§4.8.2 第 7 条、§9 第 26 条 |
+| `ICE_PEER_SILENCE_CLOSE`（B） | 20 秒（会话期间每秒看一次 `peer_silent_for()`） | 控制端在 KCP 上静默满这么久就丢守卫、关会话。比控制端 `io_loop` 的 `KCP_PEER_SILENCE_LIMIT` 8 秒长：远程桌面重连要在旧连接关闭前登录上，不然"会话结束后锁屏"会误锁；空闲的 mux 和出口隧道也不会比控制端 18 秒的读超时更早断开。§4.8.2 第 7 条、§9 第 26 条 |
 | `MAX_SOCKETS` | 8 个 / agent | 每个物理地址一个：host IPv4 最多 4 个、host IPv6 最多 4 个；srflx 复用底座 socket |
 | 候选上限 | host IPv4 4、host IPv6 4（每个 /64 一个，有临时地址只留临时地址）、srflx IPv4 4、srflx IPv6 2 | 合计 14 ≤ 16 |
 | `OFFER_SEEN_MAX`（B） | 1024 条 | 去重表；条目在 `clock_skew(ts) < −40` 时过期（§2.5 第 4 步）；满了丢新的、不淘汰旧的 |
@@ -1060,7 +1060,7 @@ create index if not exists idx_ice_at on ice_result(at);
 - `ConnTracker` 加 `on_ice_result(&self, r: IceResult)`（和 H1~H5 一样只锁 std `Mutex`、不 `await`）：把 `IceResult` 推进 `TrackerState` 里一个新的有界缓冲 `ice_results: Vec<IceResult>`，带和 `conn_attempt` 同样取值、单独计数的每来源（60 行/分钟，按 `a_ip` 的 `source_key`）和全局（120 行/分钟）上限（`has_room`，`conn_tracker.rs` L351），超了丢弃并计数（RESULT 不认证，必须有上限；连接本身已被每来源 32 条并发兜一层）。ICE 的每来源计数表在 `sweep` 里和 `rows_per_ip` 一样按窗口 `retain`（L582）。
 - 写库通道（`spawn_tasks` 里的 `mpsc::channel::<Finalized>`，L805【读码】）的元素改成 `enum Row { Attempt(Finalized), Ice(IceResult) }`，`write` 按类别分两种插入（`conn_attempt` 那一类照旧按 `Finalized` 查令牌，L630~641）；5 秒收尾任务（L803~834）把 `ice_results` 一起取走、入同一个队列。测试用的 `flush()`（`cfg(test)`，L798~802，现在只 sweep 并写 `conn_attempt`）一并取走并写入 `ice_results`。
 - 每小时修剪：`hourly_purge`（L736）加一步 `ice_result`：删 `at` 早于 `RETENTION_MS`（90 天）的行，再只留最新的 `MAX_ICE_ROWS = 200_000` 行。现有 `purge`/`trim`（L713~733）把表名和时间列写死，给它们加表名和时间列参数，或照抄成 ICE 的两个函数；不单开定时器。行数上界：最坏一行约 350 字节（`b_id` 最长 253 字节：`RegisterPk` 接受这么长的 ID，有人可以拿长 ID 的设备当 B），加 `at` 索引，20 万行约 80 MB【推测，没实测】，远小于 `conn_attempt` 的上界（约 0.5 GB，`conn_tracker.rs` L55~63 的注释）。
-- `IceResult` 的字段直接取 §2.2 `LeapgateIceResult` 的值（`outcome`、`elapsed_ms`、`local_kind`、`remote_kind`、`family`、`local_net`），加 S 这边的 `a_ip`、`b_id`、`at = now_ms()`（`at` 同时用作限额窗口的时刻）；枚举转 §2.13 的固定小写文字。`IceResult::abandoned(a_ip, b_id)` 是 `outcome = "abandoned"`、其余为 `None`。原稿没说的取值规则（实施时定）：`Outcome` 不在枚举里的数按 0 值记成 `unknown`；`Kind`、`Net` 越界的数记 NULL；`elapsed_ms` 每条 RESULT 都存（含 `unknown`）；选中对的四个字段只在 `connected` 时存，别的结果即使 A 填了也丢掉；`family` 照 A 报的存，不校验是不是 4 或 6。
+- `IceResult` 的字段直接取 §2.2 `LeapgateIceResult` 的值（`outcome`、`elapsed_ms`、`local_kind`、`remote_kind`、`family`、`local_net`），加 S 这边的 `a_ip`、`b_id`、`at = now_ms()`（`at` 同时用作限额窗口的时刻）；枚举转 §2.13 的固定小写文字。`IceResult::abandoned(a_ip, b_id)` 是 `outcome = "abandoned"`、其余为 `None`。取值规则：`Outcome` 不在枚举里的数按 0 值记成 `unknown`；`Kind`、`Net` 越界的数记 NULL；`elapsed_ms` 每条 RESULT 都存（含 `unknown`）；选中对的四个字段只在 `connected` 时存，别的结果即使 A 填了也丢掉；`family` 照 A 报的存，不校验是不是 4 或 6。
 - 实现上，`conn_attempt` 原有的每来源和全局限额逻辑抽成一个两张表共用的函数，各用各的计数器，`conn_attempt` 的行为和现有测试不变；`purge`/`trim` 改成带表名和时间列参数（上面两种写法里的前一种），每小时修剪里 `ice_result` 排在 `conn_attempt` 后面，中间停 20 毫秒（和审计表同一个 `PURGE_PAUSE`）；写库队列（10000 条）和批大小两类共用。
 
 ### 3.8 命令行（`src/cli/ops.rs`）
@@ -1087,7 +1087,7 @@ create index if not exists idx_ice_at on ice_result(at);
 
 `server/Cargo.toml` 显式声明 `crc32fast = "1"`（FINGERPRINT 用；经 `flate2` 已在树里，`Cargo.lock` L717 是 1.4.2【读码】，不新增包）。`sodiumoxide 0.2.7` 的 `sign::{sign_detached, to_curve25519_pk}`、`sealedbox::seal`、`auth`、`utils::memcmp`、`randombytes` 都是已有依赖（`server/Cargo.lock` L3672【读码】）。不引入别的新包（STUN 手写、不加 `stun_codec`）。
 
-给 coder 的提醒：已提交的 `server/Cargo.lock` 里 `leapgate-server` 这一项不在字母顺序的位置上（改名时直接替换文本留下的），在服务端跑任何 cargo 命令都会让它挪回原位，得到约 80 行纯排序的 diff、版本不变【读码：排序后逐行相同】。建议在本块之前单独提交一次，免得混进 ICE 的 diff（已照做：`17dead7` 只挪顺序，ICE 的提交里锁文件只多 `crc32fast` 一行）。
+ICE 的改动里锁文件只多 `crc32fast` 一行。
 
 ### 3.11 要同步的 `server/LEAPGATE.md` 章节
 
@@ -1111,9 +1111,7 @@ create index if not exists idx_ice_at on ice_result(at);
 | §14 命令行 | `stats` 等 | `stats` 补 ICE 结果计数和口径说明 |
 | §16 测试 | 01、02 的清单 | 加 §6.1 的服务端 ICE 测试清单 |
 
-（另：`server/LEAPGATE.md` §17"提交信息用中文"和 AGENTS.md 2026-10-24"四个公开仓库一律英文"冲突，和 ICE 无关，同步时顺手改。）
-
-上表已在 S3（`d2fe1ac`）全部同步，§17 也改成了英文；审查修订后 §9.5 的示例响应改成 `"features": ["ice"]`，§6 第 8 条的名额一步改成"先 `try_into_v4` 再取 `source_key`"。
+上表各项已同步进 `server/LEAPGATE.md`；§9.5 的示例响应是 `"features": ["ice"]`，§6 第 8 条的名额一步是"先 `try_into_v4` 再取 `source_key`"。
 
 服务端的单元测试清单在 §6.1。
 
@@ -1192,7 +1190,7 @@ impl Agent {
 pub fn open_forward(m: &LeapgateIce) -> Opened;   // Drop | Bad{ session: Bytes } | Ok{ session: [u8; 16], peer: AnswerParams }
 ```
 
-和原稿不同的几处（实施时定）：`Opened::Bad` 的 session 是 `Bytes`（"内层 session 不是 16 字节"也要回 `REJECT{BAD}`，这时没有 16 字节可带）；`AnswerParams` 的字段是 `pub(crate)`，crate 内的回环测试直接构造；另外公开导出 `ICE_VER`，胶水构造和比对 `ver` 都用它。
+几处细节：`Opened::Bad` 的 session 是 `Bytes`（"内层 session 不是 16 字节"也要回 `REJECT{BAD}`，这时没有 16 字节可带）；`AnswerParams` 的字段是 `pub(crate)`，crate 内的回环测试直接构造；另外公开导出 `ICE_VER`，胶水构造和比对 `ver` 都用它。
 
 `LocalAddr` 带地址和它所在网卡的 `net_cost`、地址族罚分档（算本地偏好用，§2.10）。`local_addrs()` 之外只有一个公开构造 `impl LocalAddr { pub fn new(addr: IpAddr, net_cost: u8) -> Self; }`，罚分档由地址自己算（§2.10），字段不公开；示例程序（crate 外）用它造 `gather_on` 的参数。F1 之后 `LocalAddr` 另带这块网卡最多 2 个 DNS 服务器（私有字段，只由 `local_addrs()` 填）；`LocalAddr::new` 造出的没有 DNS 服务器，所以示例程序和回环测试的行为不受 F1 影响。`Gathered` 是 socket、候选、证明的集合，`Offer`、`Agent` 从它构造。
 
@@ -1204,11 +1202,11 @@ pub fn open_forward(m: &LeapgateIce) -> Opened;   // Drop | Bad{ session: Bytes 
 
 ### 4.3 `ice/gather.rs`：收集候选和 socket
 
-**选地址**（`local_addrs`；双地址族，不复用 `lan.rs::select_candidates`——那个只出 IPv4、给已合入的局域网 TCP 多候选用，本块不动它【读码：`lan.rs` L108~133】）：拿 `lan.rs` 扩展后的网卡列表（§4.7），先挑出**能出候选的网卡**：在线、`!is_virtual`（IfType 和关键字，§4.7）、有默认网关（`has_gateway_v4 || has_gateway_v6`）。没有网关的网卡一律不出候选：Hyper-V 内部交换机、WSL 的 `vEthernet`、VMware host-only 这类只通本机的虚拟口靠这一条排掉，不必加 `hyper-v`/`vethernet` 关键字；外部虚拟交换机的 `vEthernet` 有网关、是宿主机真正上网的口，照常收（§4.7 第 2 条）。再按下表选，每个被选中的地址绑一个 socket：
+**选地址**（`local_addrs`；双地址族，不复用 `lan.rs::select_candidates`——那个只出 IPv4、给现有的局域网 TCP 多候选用，本块不动它【读码：`lan.rs` L108~133】）：拿 `lan.rs` 扩展后的网卡列表（§4.7），先挑出**能出候选的网卡**：在线、`!is_virtual`（IfType 和关键字，§4.7）、有默认网关（`has_gateway_v4 || has_gateway_v6`）。没有网关的网卡一律不出候选：Hyper-V 内部交换机、WSL 的 `vEthernet`、VMware host-only 这类只通本机的虚拟口靠这一条排掉，不必加 `hyper-v`/`vethernet` 关键字；外部虚拟交换机的 `vEthernet` 有网关、是宿主机真正上网的口，照常收（§4.7 第 2 条）。再按下表选，每个被选中的地址绑一个 socket：
 
 | 候选 | 规则（§2.7 地址类别用 `ice/sig.rs` 的分类函数） | 上限 |
 |---|---|---|
-| host IPv4 | 能出候选、而且有 IPv4 默认网关（`has_gateway_v4`，和已合入的局域网多候选同一条）的网卡上的私网 IPv4（`10/8`、`172.16/12`、`192.168/16`）；网卡上直接配的公网 IPv4 也收（它要靠 Binding 拿到证明才过得了 S 的过滤） | 4 |
+| host IPv4 | 能出候选、而且有 IPv4 默认网关（`has_gateway_v4`，和现有的局域网多候选同一条）的网卡上的私网 IPv4（`10/8`、`172.16/12`、`192.168/16`）；网卡上直接配的公网 IPv4 也收（它要靠 Binding 拿到证明才过得了 S 的过滤） | 4 |
 | host IPv6 | 能出候选的网卡上的全局地址（`2000::/3`）和 ULA（`fc00::/7`，`fdfe:dcba:9876::/48` 除外）；不要链路本地；DAD 为 Preferred；**每个 /64 只留一个，有临时地址时只留临时地址**（分组和取舍规则见 §4.7 第 5、6 条，在这里做，不改 `Nic.ipv6`） | 4（每 /64 一个） |
 | srflx IPv4 | 每个 host IPv4 socket 向会合服务器的 IPv4 地址（21116/UDP）发 §2.9.3 的 Binding 请求，映射地址不等于底座时成为候选（底座是这个 host socket），同一映射地址只留一份；客户端不按 §2.7 过滤映射地址，由 S 过滤 | 4 |
 | srflx IPv6 | 每个 host IPv6 socket 向会合服务器的 IPv6 地址发 Binding 请求；没有 NAT66 时映射等于 host，去重后不另报 | 2 |
@@ -1216,7 +1214,7 @@ pub fn open_forward(m: &LeapgateIce) -> Opened;   // Drop | Bad{ session: Bytes 
 
 合计最多 14 个候选 ≤ `MAX_CANDIDATES`（16），socket 最多 8 个（`MAX_SOCKETS`，srflx 复用底座 socket）。上限内的取舍：代价低的网卡在前，同代价按链路速度从高到低。
 
-**会合服务器的地址**（`ice/dns.rs`；F1，维护者 2026-10-25 定，原稿是只用 `tokio::net::lookup_host` 走系统解析）：每次 ICE 尝试解析一次会合服务器的 `host:port`（A 用 `get_rendezvous_server` 的结果，B 用 mediator 的 `host`），IPv4 socket 发给解析出的第一个 IPv4 地址，IPv6 socket 发给第一个 IPv6 地址；哪一族解析不出就不问那一族的 srflx。S 不知道自己有没有可达的 IPv6（没有检测、没有配置项【读码】），所以只能这样按"有没有 AAAA、Binding 回没回来"判断，不假定环境。解析规则：
+**会合服务器的地址**（`ice/dns.rs`；F1，不只用 `tokio::net::lookup_host` 走系统解析）：每次 ICE 尝试解析一次会合服务器的 `host:port`（A 用 `get_rendezvous_server` 的结果，B 用 mediator 的 `host`），IPv4 socket 发给解析出的第一个 IPv4 地址，IPv6 socket 发给第一个 IPv6 地址；哪一族解析不出就不问那一族的 srflx。S 不知道自己有没有可达的 IPv6（没有检测、没有配置项【读码】），所以只能这样按"有没有 AAAA、Binding 回没回来"判断，不假定环境。解析规则：
 - IP 字面量（含 `[v6]:port`）直接用；没有端口的串解析不出地址（和 `lookup_host` 一样）。
 - 域名先问**物理网卡自己的 DNS 服务器**：每个 host 地址带上它所在网卡同地址族、不属于 §2.7"丢弃"类的前 2 个 DNS 服务器（链路本地、Windows 的 `fec0:0:0:ffff::` 占位地址、`198.18/15` 的 fake-ip DNS、回环都跳过），再按 host 地址的顺序（IPv4 在前）取前 2 个不同的服务器。每个服务器用一个单独的临时 UDP socket（绑在带它的那个 host 地址上，不用 ICE 的 socket）同时发 A 和 AAAA 查询（随机事务号，RD=1）：一个 DNS 服务器两种记录都可能答。
 - 只认来自该服务器 53 端口、事务号相同、QR=1、问题段相同（不分大小写）的回包，其余忽略、接着等。RCODE 不为 0、或格式不对的匹配回包算"这个服务器这种记录没有答案"，不从里面取记录。从回答段取和问题同类型的记录，跳过 CNAME，不跟压缩指针；A 记录长度不是 4（AAAA 不是 16）的整条回包算格式不对。A、AAAA 都答完就结束；到截止时间只答了一种时用已收到的那种。
@@ -1255,7 +1253,7 @@ stun_codec::define_attribute_enums!(
 ```
 
 - `Padding`（codepoint 0x0026，§2.9.1）和 `LeapgateProof`（0xC1E9）照库里 `RawAttribute` 的写法用 `bytecodec::bytes::{RemainingBytesDecoder, BytesEncoder}` 包一层，各有 `pub const CODEPOINT: u16`、derive `Debug/Clone/PartialEq/Eq/Hash`、`impl stun_codec::Attribute`【读码：`stun_codec 0.3.5` `macros.rs`、`attribute.rs`】。
-- 分流（§2.9.2）、报文格式、事务号规则和 KCP SYN 判据（§2.9.5）在本模块实现，规则以那几节为准。§2.9.4 的收包校验分在两处：收请求的全部规则（含第 5 步的角色检查，角色只在这里查）和收响应的类别、属性、MESSAGE-INTEGRITY 在本模块；检查响应的事务号是否对得上本 socket 上未完成的检查、来源是否等于当初发往的地址，在 `check.rs` 的内核（`Kernel::on_response`）里判（审查时去掉了两层重复的那一层）。S 的 Binding 响应只按事务号认，仍在本模块（§2.9.3）。
+- 分流（§2.9.2）、报文格式、事务号规则和 KCP SYN 判据（§2.9.5）在本模块实现，规则以那几节为准。§2.9.4 的收包校验分在两处：收请求的全部规则（含第 5 步的角色检查，角色只在这里查）和收响应的类别、属性、MESSAGE-INTEGRITY 在本模块；检查响应的事务号是否对得上本 socket 上未完成的检查、来源是否等于当初发往的地址，在 `check.rs` 的内核（`Kernel::on_response`）里判（只在这一层判，不重复）。S 的 Binding 响应只按事务号认，仍在本模块（§2.9.3）。
 - Binding 请求是手写的固定 100 字节（PADDING 仍在属性枚举里，测试核对用 `stun_codec` 编出的字节和它相同）。
 
 ### 4.5 `ice/check.rs`：sans-IO 检查内核
@@ -1294,9 +1292,9 @@ stun_codec::define_attribute_enums!(
 7. **WLAN 区分**：加常量 `IF_TYPE_IEEE80211 = 71`；现在生产代码只认 `IF_TYPE_ETHERNET = 6`（`lan.rs` L41），71 在测试里才有（L398）。
 8. **网络代价 `net_cost(if_type)`**：以太网（6）0、WLAN（71）10、其他物理网卡 50（§2.10，§4.3 的优先级用它）。先按第 2 条排除虚拟网卡，再按 IfType 算代价（IfType 6 里混着 VMware/ZeroTier，71 里混着 Wi-Fi Direct，都已先排除）。
 9. **地址分类函数**（§2.7 用，放 `ice/sig.rs`，`lan.rs` 的候选选择也引用）：`excluded_v6`（回环、未指定、链路本地、组播、`::ffff:0:0/96`、`fdfe:dcba:9876::/48`）、`is_ula`（`octets()[0] & 0xfe == 0xfc`）、`is_global`（`segments()[0] & 0xe000 == 0x2000`）。
-10. **网卡的 DNS 服务器**（F1，2026-10-25 加）：`Nic.dns: Vec<IpAddr>`，照网关列表的读法读 `FirstDnsServerAddress` 链表。为此 `GetAdaptersAddresses` 的标志去掉了 `GAA_FLAG_SKIP_DNS_SERVER`，所以 `nics()` 的所有现有调用方（局域网多候选、02 测速的物理网卡判断）现在也会拿到 DNS 条目，它们不读这个字段，结果不变。
+10. **网卡的 DNS 服务器**（F1）：`Nic.dns: Vec<IpAddr>`，照网关列表的读法读 `FirstDnsServerAddress` 链表。为此 `GetAdaptersAddresses` 的标志去掉了 `GAA_FLAG_SKIP_DNS_SERVER`，所以 `nics()` 的所有现有调用方（局域网多候选、02 测速的物理网卡判断）现在也会拿到 DNS 条目，它们不读这个字段，结果不变。
 
-**`is_virtual` 变严的回归面**（有意行为，§6.2 要回归测试）：第 2 条的关键字规则同时作用于 `is_physical`（它判网卡是否虚拟），而 `is_physical` 被两处已合入的代码用——已合入的局域网 TCP 多候选（`select_candidates`、`controller_bind_addr`、`connect_candidates` 的 `handshake_timeout`，`lan.rs`）和 02 测速的 `physical_snapshot`（`route/probe.rs` 的 `summarize`）。影响：原来靠"有没有网关"才漏进来的 ZeroTier/VMware 之类，现在在这两处也被判成虚拟——对局域网多候选是把一个本来连不通的候选提前去掉（更好）；对 02 测速是让落在这些网卡上的测量作废（VMware 一类本来就没有对外流量，影响可忽略）。必须加回归测试钉住"加了关键字后，`is_physical(&nics, ip)` 和 `select_candidates(&nics, ..)` 对带这些描述的网卡的判断变成虚拟"（两者都接受网卡切片；`physical_snapshot` 内部直接调 `nics()`，测它的底层 `is_physical`）。第 4 条 `Nic.ipv6` 的类型变化也落在这两处：`is_physical`、`select_candidates` 改按新结构取地址，判断结果不变，同一组回归测试一并钉住。
+**`is_virtual` 变严的回归面**（有意行为，§6.2 要回归测试）：第 2 条的关键字规则同时作用于 `is_physical`（它判网卡是否虚拟），而 `is_physical` 被两处现有代码用——现有的局域网 TCP 多候选（`select_candidates`、`controller_bind_addr`、`connect_candidates` 的 `handshake_timeout`，`lan.rs`）和 02 测速的 `physical_snapshot`（`route/probe.rs` 的 `summarize`）。影响：原来靠"有没有网关"才漏进来的 ZeroTier/VMware 之类，现在在这两处也被判成虚拟——对局域网多候选是把一个本来连不通的候选提前去掉（更好）；对 02 测速是让落在这些网卡上的测量作废（VMware 一类本来就没有对外流量，影响可忽略）。必须加回归测试钉住"加了关键字后，`is_physical(&nics, ip)` 和 `select_candidates(&nics, ..)` 对带这些描述的网卡的判断变成虚拟"（两者都接受网卡切片；`physical_snapshot` 内部直接调 `nics()`，测它的底层 `is_physical`）。第 4 条 `Nic.ipv6` 的类型变化也落在这两处：`is_physical`、`select_candidates` 改按新结构取地址，判断结果不变，同一组回归测试一并钉住。
 
 ### 4.8 `src/leapgate_hooks.rs`：控制端 `race_ice`、被控端 `on_ice_offer`
 
@@ -1323,7 +1321,7 @@ where
   - `interface.get_lch().read().unwrap().other_server.is_some()`（`id@server?key=`，会换服务器和 Key，L467~472；用 `other_server` 判，不替 `_start` 复刻换服务器的逻辑；读锁的守卫在这条语句末尾就放掉，不跨 await，§4.11）；
   - `interface.is_force_relay()`（已含强制中继、`/r`、`Config::is_proxy()`、`use_ws()` 四种，`client.rs` L2998~3002、L4923）；
   - `crate::is_udp_disabled()`（选项 `disable-udp`，`common.rs` L2701）；
-  - `!crate::get_udp_punch_enabled() && !crate::get_ipv6_punch_enabled()`（F2，维护者 2026-10-25 定：控制端本地的 `enable-udp-punch`、`enable-ipv6-punch` 两个打洞开关都关；读法和上游 `client.rs` L363~364 相同）。只管控制端：这两个是控制端的本地选项，上游被控端也不读它们，所以 `on_ice_offer` 不看；
+  - `!crate::get_udp_punch_enabled() && !crate::get_ipv6_punch_enabled()`（F2：控制端本地的 `enable-udp-punch`、`enable-ipv6-punch` 两个打洞开关都关；读法和上游 `client.rs` L363~364 相同）。只管控制端：这两个是控制端的本地选项，上游被控端也不读它们，所以 `on_ice_offer` 不看；
   - `crate::common::get_rs_pk(if key.is_empty() { config::RS_PUB_KEY } else { key }).is_none()`（没有可信 Key；`secure_tcp_required` 也会因此失败）；
   - `!leapgate::report::has_feature("ice")`（能力缓存里没有 "ice"，`report/mod.rs` L94~96；每次按 `api_root()` 现算）。
   - 连接类型不特判：端口转发、RDP 经 `Client::start`（`port_forward.rs` L178、L419）的也走 ICE。读码没发现要区别对待的理由：它们拿到的同样是 `Client::start` 返回的流，ICE 腿返回的流和上游 UDP/IPv6 打洞同形（KCP 上的 `Stream`，同样经 `secure_connection` 加密）。
@@ -1335,10 +1333,10 @@ where
   5. `offer.run` 返回 `Selected { socket, remote, local_kind, remote_kind, family, net }` → `socket.connect(remote).await`；`KcpStream::connect(socket, Duration::from_millis(KCP_HANDOFF_TIMEOUT)).await` 得到 `(kcp_guard, stream)`，两步任一失败都按 `KCP_FAILED`；`timeout(KCP_HANDOFF_TIMEOUT, Client::secure_connection(peer, answer.pk.to_vec(), key, &mut stream))` 得到 `pk`，失败、超时或 `!stream.is_secured()` 都按 `SECURE_FAILED`（和 `lan_connect` 同一条线，L39~45；这一对刚被检查证明双向通，B 的身份消息一个往返就到，不必等上游的 18 秒 `READ_TIMEOUT`）。`run` 返回 `NoPair` 按 `NO_PAIR`。
   6. 成功：ICE 腿产出流、`pk`、`kcp_guard`、`typ`、选中对的类型，连同 `sig` 一起交回，**不在腿里发 RESULT**。`race_ice` 选定 ICE 之后才在 `sig` 上发 `result { CONNECTED, elapsed_ms, local_kind, remote_kind, family, local_net }`（一次缓冲写，不等回应；`sig` 这时可能已被 S 断开，写出错就忽略，不能用 `?` 把已建好的连接丢掉）、关掉 `sig`、打 `selected` 那一行日志，再返回 `((stream, true, pk, Some(kcp_guard), typ), (0, rendezvous_server), false)`；ICE 腿的结果被竞速丢掉时 `sig` 随之关闭，S 记 `abandoned`，不会把输了的 ICE 记成 `connected`。`typ` 取 `"IPv6"`（family 6）或 `"UDP"`（family 4），沿用上游标签，界面不改【读码：`client.rs` L1072、L1498、L1508 的 `udp_nat_connect(.., "IPv6"/"UDP", ..)`】。第三项 `false`：不更新 `direct_failures`，和 `lan_connect` 返回的 `true` 不同，是有意的（ICE 的成败不该影响上游下次是否先试直连）。
   7. 失败（`NO_ANSWER`、`BAD_ANSWER`、`NO_PAIR`、`KCP_FAILED`、`SECURE_FAILED`）：在 `sig` 上发对应的 `result`（§2.3 ⑦），关掉 `sig`，打 `no direct path` 那一行日志，ICE 腿返回 `Err`。
-- **竞速**（不复用上游 `race_transports_prefer_webrtc`，`client.rs` L221）：写成泛型函数 `race_legs(ice, upstream, window_ms, is_direct) -> ResultType<Either<IceWin, Up>>`（只管两条腿谁赢，不碰 RESULT；日志只打"输给中继窗口"那一行，§4.12，2026-10-25 加），`race_ice` 调它（`is_direct` 取 `r.0.1`），单测直接测它（§6.2）。里面 `tokio::select!` 两条 `pin!` 的腿，小状态机：
+- **竞速**（不复用上游 `race_transports_prefer_webrtc`，`client.rs` L221）：写成泛型函数 `race_legs(ice, upstream, window_ms, is_direct) -> ResultType<Either<IceWin, Up>>`（只管两条腿谁赢，不碰 RESULT；日志只打"输给中继窗口"那一行，§4.12），`race_ice` 调它（`is_direct` 取 `r.0.1`），单测直接测它（§6.2）。里面 `tokio::select!` 两条 `pin!` 的腿，小状态机：
   - ICE 腿先 `Ok` → 立即胜出，丢掉 upstream（upstream 的打洞、中继随之关闭，被控端那边已起的打洞监听、中继各自超时，和上游 WebRTC 竞速同后果）。
   - upstream 先 `Ok(r)` 且 `r.0.1 == true`（直连）→ 立即胜出，丢掉 ICE 腿（信令连接随之关闭，S 记 `abandoned`）。
-  - upstream 先 `Ok(r)` 且 `r.0.1 == false`（中继）→ 从中继到达起最多等一个窗口等 ICE；窗口到或 ICE 腿失败就采用中继。窗口到时 ICE 腿还在跑，打 `lost the relay window` 那一行（§4.12）；ICE 腿在窗口内失败时它自己已经打过失败那一行，不再打。"中继到达"就是中继真正可用的时刻，窗口起点不用改（2026-10-25 读码，审查曾怀疑 fake-ip TUN 让它提前）：ICE 只有在 S 给了能验过的被控端 IdPk 时才可能胜出（IdPk 收到 ANSWER 后才验），而 S 给上游中继响应签的是同一份 IdPk（`rendezvous_server.rs` 的 `get_pk`），所以这时 `_start` 返回中继之前已经在中继连接上做完 `secure_connection`（`client.rs` L1203~1206、L1594~1600），要等被控端经 hbbr 发来的 `SignedId`，也就是被控端已经连上中继、hbbr 已经配对。fake-ip TUN 在本机完成的只是到中继的 TCP 握手，上游日志 `used to establish Relay connection` 打在 `secure_connection` 之前，所以那个数字很小，窗口并不因此提前。窗口值：读 LocalConfig 选项 `relay-fallback-delay`（`keys::OPTION_RELAY_FALLBACK_DELAY`），解析规则照抄上游 `relay_fallback_delay_ms()`（`client.rs` L641~649：按秒解析成 `f64`，有限且大于 0 时换成毫秒，否则用上游默认 `RELAY_FALLBACK_DELAY_MS` 的值，L634）。上游这个函数是 `Client` 的私有关联函数，照抄这几行而不是改它的可见性，按 `client/AGENTS.md`"接受少量重复、不改原有代码"；代价是默认值和解析规则复制了一份，合并上游时核对（§4.9）。
+  - upstream 先 `Ok(r)` 且 `r.0.1 == false`（中继）→ 从中继到达起最多等一个窗口等 ICE；窗口到或 ICE 腿失败就采用中继。窗口到时 ICE 腿还在跑，打 `lost the relay window` 那一行（§4.12）；ICE 腿在窗口内失败时它自己已经打过失败那一行，不再打。"中继到达"就是中继真正可用的时刻，窗口起点不用改（读码确认 fake-ip TUN 不会让它提前）：ICE 只有在 S 给了能验过的被控端 IdPk 时才可能胜出（IdPk 收到 ANSWER 后才验），而 S 给上游中继响应签的是同一份 IdPk（`rendezvous_server.rs` 的 `get_pk`），所以这时 `_start` 返回中继之前已经在中继连接上做完 `secure_connection`（`client.rs` L1203~1206、L1594~1600），要等被控端经 hbbr 发来的 `SignedId`，也就是被控端已经连上中继、hbbr 已经配对。fake-ip TUN 在本机完成的只是到中继的 TCP 握手，上游日志 `used to establish Relay connection` 打在 `secure_connection` 之前，所以那个数字很小，窗口并不因此提前。窗口值：读 LocalConfig 选项 `relay-fallback-delay`（`keys::OPTION_RELAY_FALLBACK_DELAY`），解析规则照抄上游 `relay_fallback_delay_ms()`（`client.rs` L641~649：按秒解析成 `f64`，有限且大于 0 时换成毫秒，否则用上游默认 `RELAY_FALLBACK_DELAY_MS` 的值，L634）。上游这个函数是 `Client` 的私有关联函数，照抄这几行而不是改它的可见性，按 `client/AGENTS.md`"接受少量重复、不改原有代码"；代价是默认值和解析规则复制了一份，合并上游时核对（§4.9）。
   - upstream 先 `Err` → 继续等 ICE：ICE 成功就用 ICE，失败返回 upstream 的那个 `Err`。
   - **ICE 失败一律不对外报错**：最终返回的错误文本一律取 upstream 的（界面靠全文匹配 "Remote desktop is offline" 等做自动重试，`flutter/lib/models/model.dart` L1000~1009【读码】；ICE 没有打洞那套拒绝文本）。
 - **H-2 删掉**：不给 `race_transports_prefer_webrtc` 加 `pub(crate)`。它要两条腿都是 `BoxFuture`（带 `Send`），而 `_start` 的 future 在泛型上下文里不是 `Send`（`is_switch_sides_back(conn_type, &interface)` 跨 await 借着 `&impl Interface`，`Interface` 没有 `Sync`，L434、L4896【读码，并用最小模型编译验证过】）；而且它两腿都失败时返回后失败那条腿的错误，前提是两腿拿到同一个会合服务器拒绝文本（上游测试 `same_failure_on_both_legs_reported_once` 写明），ICE 腿做不到。
@@ -1364,7 +1362,7 @@ pub(crate) fn on_ice_offer(ice: LeapgateIce, host: String, server: ServerPtr) {
    - 回 REJECT 的连接方式同第 5 条（新开加密 TCP、整段 `SIGNAL_TIMEOUT`、发完断开），然后还名额、结束。
 5. `let local = leapgate::ice::local_addrs().await;` 为空（没有物理候选）→ 按第 4 条回 `REJECT{UNSUPPORTED}`。否则 `tokio::join!` 并行收集（`AGENT_TTL` 从这里开始算，§2.11）（`gather(&local, &host)`）和建回 ANSWER 用的加密 TCP（照上游 WebRTC 应答的写法：`connect_tcp(&host, CONNECT_TIMEOUT)` → `secure_tcp_required(&mut s, &crate::get_key(true).await)`，`rendezvous_mediator.rs` L1158~1171；整段套 `SIGNAL_TIMEOUT`）。信令连接建不起来就收摊、还名额：ANSWER 到不了 A，A 不会读 ICE socket，B 的检查全是白发（A 那边会按 `NO_ANSWER` 收摊）。
 6. `let agent = Agent::new(gathered, peer);` 回 ANSWER 并开始检查（同时进行）：在那条连接上 `s.send(LeapgateIce { ver: 1, Answer { session, params: agent.params(), proofs } })`，发完断开；`pk` 字段留空（S→A 才填）；同时 `agent.run()`。
-7. `agent.run().await` → `Accepted { socket, remote, init_packet }`：`socket.connect(remote).await`；`KcpStream::accept(socket, Duration::from_millis(KCP_HANDOFF_TIMEOUT), Some(init_packet)).await` 得到 `(kcp_guard, stream)`；还名额；`crate::server::create_tcp_connection(server, stream, remote, true, ConnectionMeta::default()).await`；`kcp_guard` 留在作用域里直到会话结束（照 `udp_nat_listen` 的 `stream.0`，`rendezvous_mediator.rs` L1488~1497、`server.rs` L217~262）。2026-10-28 改：`create_tcp_connection` 套在 `serve_over_kcp(kcp_guard, ICE_PEER_SILENCE_CLOSE, …)` 里，会话期间每秒看一次 `peer_silent_for()`，控制端静默满 20 秒就丢掉守卫、按上游断线流程关会话；会话自己结束时守卫交给 `release_kcp`（同第四期 K0），收尾数据和 FIN 照常发出。原稿让守卫活到会话结束，控制端崩溃或断网后被控端要等 Connection 的 30 秒超时（实测 30~50 秒）才停采集，见 §9 第 26 条。`run` 超时或 KCP 交接失败就收摊，只打 `trace`。
+7. `agent.run().await` → `Accepted { socket, remote, init_packet }`：`socket.connect(remote).await`；`KcpStream::accept(socket, Duration::from_millis(KCP_HANDOFF_TIMEOUT), Some(init_packet)).await` 得到 `(kcp_guard, stream)`；还名额；`crate::server::create_tcp_connection(server, stream, remote, true, ConnectionMeta::default()).await`；`kcp_guard` 留在作用域里直到会话结束（照 `udp_nat_listen` 的 `stream.0`，`rendezvous_mediator.rs` L1488~1497、`server.rs` L217~262）。`create_tcp_connection` 套在 `serve_over_kcp(kcp_guard, ICE_PEER_SILENCE_CLOSE, …)` 里，会话期间每秒看一次 `peer_silent_for()`，控制端静默满 20 秒就丢掉守卫、按上游断线流程关会话；会话自己结束时守卫交给 `release_kcp`（同第四期 K0），收尾数据和 FIN 照常发出。如果让守卫活到会话结束，控制端崩溃或断网后被控端要等 Connection 的 30 秒超时（实测 30~50 秒）才停采集，见 §9 第 26 条。`run` 超时或 KCP 交接失败就收摊，只打 `trace`。
 8. **交给 `create_tcp_connection` 的地址是 ICE 实际选中的远端地址 `remote`**，和 TCP 局域网直连 accept 到的真实地址一致，不像上游 IPv6 打洞用 S 看到的 IPv4（`udp_nat_listen` 传 `peer_addr_v4`，`rendezvous_mediator.rs` L1497）。影响写清楚：
    - IP 白名单 `check_whitelist`（`connection.rs` L1418，`on_open` L1507 用 `addr.ip()`）会按这个地址判，所以配了白名单的 B 不做 ICE（第 4 条）；
    - 每来源未认证名额 `admit_unauthorized`（`connection.rs` L123，按 `addr.ip()` 计，`MAX_UNAUTHORIZED_CONNS_PER_ADDR`）按真实来源算；
@@ -1399,7 +1397,7 @@ features = [ ..., "Win32_System_IO" ]   # 在现有四个 feature 基础上加�
 - `stun_codec`、`bytecodec` 都已在 `client/Cargo.lock`（`client/Cargo.lock` L8058 起；引入方是根 crate 的非可选依赖 `stunclient 0.4`，和 webrtc 无关【读码】），不下载新包，但 `leapgate` 这一项的依赖列表会变，`--locked` 构建前先更新 lock。直接声明还有一个好处：上游哪天删掉 `stunclient`，Leapgate 不受影响。
 - `windows` 加 `Win32_System_IO`：`WSAIoctl` 的参数含 `OVERLAPPED`，要这个 feature（`windows 0.61.1` `WinSock/mod.rs` L595~597【读码】）；根 crate 开了，但单独 `cargo test -p leapgate` 不合并根 crate feature（resolver 2），不加就编不过。`SIO_UDP_CONNRESET`、`SOCKET` 在已开的 `Win32_Networking_WinSock` 里。
 - 不新增别的包：ufrag/pwd 随机数、`memcmp`、sealed box、Ed25519 转换都走 `hbb_common` 重导出的 `sodiumoxide`；`serde_json`/`bytes`/`tokio`/`rand` 同样重导出。CRC-32（FINGERPRINT）由 `stun_codec` 自带（它依赖 `crc`），客户端不另引。
-- **版本号前移**：`libs/leapgate` 从 0.3.0 改 0.3.1。原来契约 01 §2.3 把 0.3.1 留给 04，04 不做后归 ICE，服务端 `ICE_MIN_LEAPGATE_VER = get_version_number("0.3.1") = 3010`（§2.11、§2.12）。**同步改 01 §2.3** 那句"04 块客户端合入时前移到 0.3.1……第三期只前移这两次"为"05 块（自研 ICE）客户端合入时前移到 0.3.1，05 的 `ICE_MIN_LEAPGATE_VER` 取 0.3.1"（2026-10-24 已同步）。
+- **版本号前移**：`libs/leapgate` 从 0.3.0 改 0.3.1。原来契约 01 §2.3 把 0.3.1 留给 04，04 不做后归 ICE，服务端 `ICE_MIN_LEAPGATE_VER = get_version_number("0.3.1") = 3010`（§2.11、§2.12）。01 §2.3 的版本号规则相应写成"05 块（自研 ICE）客户端合入时前移到 0.3.1，05 的 `ICE_MIN_LEAPGATE_VER` 取 0.3.1"。
 
 ### 4.11 运行时和 `Send` 约束
 
@@ -1420,17 +1418,17 @@ features = [ ..., "Win32_System_IO" ]   # 在现有四个 feature 基础上加�
 - ICE 腿失败：`leapgate ice: no direct path (<outcome>), falling back`（`<outcome>` 取 §2.13 的小写名，`connected` 以外的五种）。
 - 收到 REJECT：`leapgate ice: rejected (<reason>), falling back`（`<reason>` 取 §2.13 的小写名）。
 - 信令连接建不起来（连不上、密钥交换失败、超过 `SIGNAL_TIMEOUT`），或等 ANSWER 时连接被关、读出错（§4.8.1 第 4 步）：`leapgate ice: signaling failed, falling back`。
-- 输给中继窗口（上游先给出中继、等满窗口 ICE 腿还在跑，§4.8.1 竞速）：`leapgate ice: lost the relay window after <N> ms`（`<N>` 从竞速开始算到窗口结束，也就是 ICE 腿被丢掉时已经跑了多久）。2026-10-25 加：没有这一行时，这种结果在控制端日志里一行都没有，只有服务端记一行 `abandoned`，按 §6.4 的分类会被漏掉。
+- 输给中继窗口（上游先给出中继、等满窗口 ICE 腿还在跑，§4.8.1 竞速）：`leapgate ice: lost the relay window after <N> ms`（`<N>` 从竞速开始算到窗口结束，也就是 ICE 腿被丢掉时已经跑了多久）。加这一行的原因：没有它时，这种结果在控制端日志里一行都没有，只有服务端记一行 `abandoned`，按 §6.4 的分类会被漏掉。
 - 上游直连先赢、ICE 被竞速取消，以及没有物理网卡候选（ICE 没启动）时不打日志（前者上游的结果日志已经说明了谁赢）。
 
 被控端和收包路径上的，频率可能由对端或 S 控制，按 `client/AGENTS.md` Logging 只能 `throttled_log!`（每分钟一条）或 `trace`（静默关闭那一行除外，见下）：
 - B 丢弃 FORWARD（前提、外形、验签、时间窗、去重、解密任一步不过，或名额满）：`leapgate ice: dropped a forwarded offer`，`info` 级 `throttled_log!`（每分钟最多一条），不打原因细节。B 回 ANSWER、REJECT 发送失败只打 `trace`（频率由让 S 转发 FORWARD 的人决定）。
 - 检查包收发、STUN 校验失败、agent 超时、KCP 交接失败：`trace`。
-- ICE 会话期间控制端在 KCP 上静默满 `ICE_PEER_SILENCE_CLOSE`（20 秒）：`leapgate ice: peer silent for <时长>, closing the session`，`info`，每个会话最多一条，不限频：它和上游关这条连接时打的 `Connection closed` 一一对应，频率不比那一行高。时长是 `Duration` 的 Debug 写法，落在 20 秒到 21 秒多（2026-10-28 加，§4.8.2 第 7 条）。
+- ICE 会话期间控制端在 KCP 上静默满 `ICE_PEER_SILENCE_CLOSE`（20 秒）：`leapgate ice: peer silent for <时长>, closing the session`，`info`，每个会话最多一条，不限频：它和上游关这条连接时打的 `Connection closed` 一一对应，频率不比那一行高。时长是 `Duration` 的 Debug 写法，落在 20 秒到 21 秒多（§4.8.2 第 7 条）。
 
 ### 4.13 `client/LEAPGATE.md` 要同步的章节
 
-ICE 合入后按代码的最终行为写：
+按代码的最终行为写：
 
 | 章节 | 改什么 |
 |---|---|
@@ -1444,9 +1442,9 @@ ICE 合入后按代码的最终行为写：
 
 **§7 自研 ICE 的结构**（按代码的最终行为写，不复述契约推导）：挂钩和合并上游时的核对点（§4.9）；候选规则（§4.3、§4.7）；优先级公式（§2.10，两端必须一致，改参数时两端一起改）；控制端启用条件和竞速（§4.8.1）；被控端（§4.8.2）；事务号和 KCP 交接（§2.9.5）；版本号前移规则（§4.10，写一句免得以后改协议忘了前移）；固定日志登记（§4.12）；兼容表（照 §5 摘写客户端相关的行）；已知限制（照 §9 的第 2~5、7~10、13、14、18~21 条）。
 
-**§8 的去留**：新建 §8"不配也能用：自动降级与可选优化"，把 02 的 §5.6 整段挪进去（实施时原位置留了一行"挪到 §8"，保住 §5.7、§5.8 和契约里 §5.4~§5.6 引用的编号），再加 ICE 的两行（抽象描述：不配任何代理规则时，ICE 靠两端对物理网卡候选逐对实测直连，在"路由器只代理 TCP""本机开 TUN""两端 UDP 出口不同"的网络里也能成；不满足时自动回落上游路径和中继，不要求用户配规则）。§6 = 默认 ID 加盐（03）、§7 = 自研 ICE（05）。
+**§8 的去留**：新建 §8"不配也能用：自动降级与可选优化"，把 02 的 §5.6 整段挪进去（原位置留一行"挪到 §8"，保住 §5.7、§5.8 和契约里 §5.4~§5.6 引用的编号），再加 ICE 的两行（抽象描述：不配任何代理规则时，ICE 靠两端对物理网卡候选逐对实测直连，在"路由器只代理 TCP""本机开 TUN""两端 UDP 出口不同"的网络里也能成；不满足时自动回落上游路径和中继，不要求用户配规则）。§6 = 默认 ID 加盐（03）、§7 = 自研 ICE（05）。
 
-上面各项已在 C4（`d44e6a35c`）同步，F1、F2 和审查补的已知限制随后补进 §7.2、§7.4、§7.10（`client/LEAPGATE.md` §7 开头写明它和本文有出入时以代码为准）。
+上面各项已同步进 `client/LEAPGATE.md`，F1、F2 和后来补充的已知限制在 §7.2、§7.4、§7.10（`client/LEAPGATE.md` §7 开头写明它和本文有出入时以代码为准）。
 
 客户端的单元测试清单在 §6.2，集成测试在 §6.3。
 
@@ -1484,7 +1482,7 @@ ICE 只在"两端都是含本块的 Leapgate、服务端是含本块的 leapgate
 | B 便携运行 | mediator、心跳、FORWARD 处理都在界面进程里，ICE 照常应答；`MAX_AGENTS` 和去重表也在这个进程里。没有安装时加的防火墙放行规则，第一次收包时 Windows 防火墙可能弹提示【待实测，§6.4 第 7 步】 |
 | 两端只有 IPv6，或只有 IPv4 | 地址族各自配对，有哪一族用哪一族 |
 | 会合服务器没有 IPv6 地址（只有 A 记录，或用 `-b` 只绑了 IPv4） | 没有 IPv6 srflx；全局 IPv6 host 候选照常（§4.3） |
-| 本机开着 fake-ip 的 TUN（mihomo、Clash），会合服务器配的是域名 | 物理网卡 DNS 给出真实地址，srflx 照常（F1，§4.3）；网卡没有可用的 DNS 服务器时退回系统解析，假地址被丢掉，这一次没有 srflx。【推测：只有单元测试（回环上的假 DNS 服务器），以及审查时在维护者开着 fake-ip 的机器上直接调 `resolve` 拿到了真实地址；端到端由 §6.4 第 10 步覆盖】 |
+| 本机开着 fake-ip 的 TUN（mihomo、Clash），会合服务器配的是域名 | 物理网卡 DNS 给出真实地址，srflx 照常（F1，§4.3）；网卡没有可用的 DNS 服务器时退回系统解析，假地址被丢掉，这一次没有 srflx。【推测：只有单元测试（回环上的假 DNS 服务器），以及在一台开着 fake-ip 的 Windows 上直接调 `resolve` 拿到了真实地址；端到端由 §6.4 第 10 步覆盖】 |
 | 路由器自己做 fake-ip（例如 OpenClash 的 fake-ip 模式） | 网卡 DNS 和系统解析给的都是假地址，都被丢掉，没有 srflx，只剩 host 和 prflx，不通就干净回落（§9 第 22 条） |
 
 ## 6. 测试
@@ -1521,7 +1519,7 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
 
 不测：真实的 NAT 行为（§6.3）、GeoIP、`io_loop` 停顿的实际时长。
 
-**实施结果**（2026-10-25，`ebc4028`）：测试机上 `cargo test` 共 396 个通过（第一期到 02 是 359 个）。Harness 选了给 `listener_as` 加 `key` 参数；凡是会登记 session 的测试都从自己独有的来源连接，不只 `BUSY` 那条。实现自测、三路审查和复核共做了 60 多个变异，第一轮存活的几个（ANSWER 不用 B 的证明、重发按重发 OFFER 里的 `id` 读地址、ANSWER 和 B 的 REJECT 不查 `ver`、已应答后仍重发）都补了测试并确认转红；仍存活的只有等价变异和只在公网不可路由的 `::a.b.c.d` 来源上才有差别的一个。
+**实施结果**：测试机上 `cargo test` 共 396 个通过（第一期到 02 是 359 个）。Harness 选了给 `listener_as` 加 `key` 参数；凡是会登记 session 的测试都从自己独有的来源连接，不只 `BUSY` 那条。共做了 60 多个变异，最初存活的几个（ANSWER 不用 B 的证明、重发按重发 OFFER 里的 `id` 读地址、ANSWER 和 B 的 REJECT 不查 `ver`、已应答后仍重发）都补了测试并确认转红；仍存活的只有等价变异和只在公网不可路由的 `::a.b.c.d` 来源上才有差别的一个。
 
 ### 6.2 客户端单元测试（`cargo test -p leapgate`）
 
@@ -1545,16 +1543,16 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
   - 放大上限：同一 agent 收到 N（远大于 4）个不同来源的合法请求时，学到的 prflx 不超过 `MAX_PRFLX`，对外检查包总数不超过 (32 + `MAX_PRFLX`) × 5 加提名；进行中、已成功、已失败的对收到对端检查时不重起检查（一对判失败后再按它的远端地址反复喂合法请求，这一对不再发包）。
   - 选中对的本端类型：成功响应的映射地址等于底座 → `host`、等于已收集的 srflx → `srflx`、都不是 → `prflx`。
   - 检查响应的事务号对得上、来源却不是当初发往的地址（普通对和提名检查各一种）→ 忽略。
-- **`ice/dns.rs`**（F1）：查询的格式，非法域名（空标签、标签超过 63 字节、总长超过 255 字节）不出查询；经 CNAME 链读出 A、AAAA；只有对同一问题的成功回包给地址（RCODE 不为 0 给空、问题段不符或格式不对给"不是回包"）；随机字节喂解析不 panic；回环上起一个假 DNS 服务器（随机端口）喂 `resolve_via`：网卡 DNS 的答案优先，系统的答案只在网卡 DNS 没有地址时用、而且要去掉"丢弃"类，服务器只答 A、从不答 AAAA 时到截止时间仍用已收到的 A（审查补的，修复前是红的）。系统解析那一路用地址字面量的名字，离线也有答案。`gather.rs` 另有一条：每个地址带上本网卡同地址族的前 2 个 DNS 服务器。
+- **`ice/dns.rs`**（F1）：查询的格式，非法域名（空标签、标签超过 63 字节、总长超过 255 字节）不出查询；经 CNAME 链读出 A、AAAA；只有对同一问题的成功回包给地址（RCODE 不为 0 给空、问题段不符或格式不对给"不是回包"）；随机字节喂解析不 panic；回环上起一个假 DNS 服务器（随机端口）喂 `resolve_via`：网卡 DNS 的答案优先，系统的答案只在网卡 DNS 没有地址时用、而且要去掉"丢弃"类，服务器只答 A、从不答 AAAA 时到截止时间仍用已收到的 A。系统解析那一路用地址字面量的名字，离线也有答案。`gather.rs` 另有一条：每个地址带上本网卡同地址族的前 2 个 DNS 服务器。
 - **`ice/gather.rs`**（纯函数，手工构造网卡列表）：选 host IPv4、IPv6（每个 /64 一个，临时地址优先）、没有默认网关的网卡不出候选、srflx 去重、各类上限；本地偏好按网络代价、地址族罚分、序号算；没有物理网卡 → 空。`SIO_UDP_CONNRESET`（`cfg(windows)`）：用建候选 socket 的同一个函数建一个绑 `127.0.0.1` 的 socket，向本机一个已关闭的端口发一个包，随后 200 毫秒内的 `recv_from` 必须超时、不能返回 10054（去掉 ioctl 这条就失败）。
 - **`lan.rs`**：带 `zerotier`、`vmware virtual ethernet`、`wi-fi direct` 描述的网卡判成虚拟；外部虚拟交换机的 `vEthernet`（有网关、没有关键字）**不**判成虚拟。回归测试钉住 `is_virtual` 变严是有意的：`is_physical(&nics, ip)`、`select_candidates(&nics, ..)` 对带这些描述的网卡的判断变成虚拟，对普通网卡的全部 IPv6 地址（含被 ICE 去重掉的稳定地址）照旧认（§4.7）。另有 `has_gateway_v6`、按地址前 64 位分组、有临时地址时不报 DHCPv6 的 `/128`、`net_cost` 三档、`is_ula`/`is_global`/`excluded_v6`。
-- **`src/leapgate_hooks.rs`**（根 crate，`cargo test --lib`，Windows CI 会跑）：`race_legs` 照上游 `race_transports_prefer_webrtc` 的测试写法（真实计时、几十毫秒的 `ok_after`/`err_after`，`client.rs` L5698~5755）：ICE 先成功 → 用 ICE；上游先给直连 → 立即用上游；上游先给中继、ICE 在窗口内成功 → 用 ICE，窗口过了 → 用中继；上游先失败、ICE 后成功 → 用 ICE；两条腿都失败 → 返回上游的错误文本（逐字相等）；上游先给中继、ICE 在窗口内失败 → 用中继（审查补的）。白名单判断：空、只有 `0.0.0.0`、含 `0.0.0.0` 的列表不限制，其余非空列表限制。启用条件 `ice_enabled` 没有单测，见 §9 第 23 条。
+- **`src/leapgate_hooks.rs`**（根 crate，`cargo test --lib`，Windows CI 会跑）：`race_legs` 照上游 `race_transports_prefer_webrtc` 的测试写法（真实计时、几十毫秒的 `ok_after`/`err_after`，`client.rs` L5698~5755）：ICE 先成功 → 用 ICE；上游先给直连 → 立即用上游；上游先给中继、ICE 在窗口内成功 → 用 ICE，窗口过了 → 用中继；上游先失败、ICE 后成功 → 用 ICE；两条腿都失败 → 返回上游的错误文本（逐字相等）；上游先给中继、ICE 在窗口内失败 → 用中继。白名单判断：空、只有 `0.0.0.0`、含 `0.0.0.0` 的列表不限制，其余非空列表限制。启用条件 `ice_enabled` 没有单测，见 §9 第 23 条。
 
 不测：真实网络（§6.3）、线程调度、网卡枚举本身（系统调用）、关键字表逐项、排序的每种组合。Windows 构建通过 `scripts/windows/build-client.ps1`。
 
 **和现成 sans-IO 库的一次性差分对照（MVP 里做一次，不进 CI）**：Q3 定了现成库只作差分测试参照。在不合并的临时分支里加 `is 0.11`，对同一组候选和模拟网络比较两边的候选对排序和最终选中的对，结论写回本节，分支删掉。约 0.5 天，计入 §10。
 
-**对照结果**（2026-10-25，基于客户端 `d44e6a35c`；临时分支从没提交，已和临时目录一起删掉）：`is` 解析为 0.11.1，作为 dev 依赖加进临时分支。为了让两边吃同样的优先级，给 `is` 注入了 §2.10 的本地偏好、把候选对上限设成 32；节奏和提名策略用 `is` 自己的（比的是排序和选择，不比时间）。模拟网络按每端全锥形、对称或不经 NAT 配，IPv6 不做转换，每跳 5 毫秒，跑 6 秒。
+**对照结果**（基于客户端 `d44e6a35c`；临时分支没有提交）：`is` 解析为 0.11.1，作为 dev 依赖加进临时分支。为了让两边吃同样的优先级，给 `is` 注入了 §2.10 的本地偏好、把候选对上限设成 32；节奏和提名策略用 `is` 自己的（比的是排序和选择，不比时间）。模拟网络按每端全锥形、对称或不经 NAT 配，IPv6 不做转换，每跳 5 毫秒，跑 6 秒。
 - 7 个场景里，两边在 A、B 两端算出的检查表内容和顺序逐项相同（含候选对优先级的值），`is` 在没有回应时第一轮检查的发送顺序也和我们相同。这覆盖了只配同地址族、不建 srflx 对（我们不建，`is` 建了再按 host 对去掉）、候选对优先级公式和第一轮发送顺序。
 - 前 6 个场景最终选中的对也相同：同一局域网私网 IPv4 加全局 IPv6，都选 IPv4 host 对（Q7）；两端全锥形，都选（A 的本地地址，B 的 srflx）；两端对称 NAT 加全局 IPv6，都选 IPv6 host 对；A 的 IPv4 在 WLAN、全局 IPv6 和 ULA 在以太网，都选以太网的全局 IPv6、ULA 排在全局之后（§2.10 的算例）；A 对称、B 全锥形，都选（A 的本地地址，B 的 srflx），B 最后被提名的对也相同；B 的检查先于 ANSWER 到达、B 没报 srflx，都把 B 的映射地址学成 prflx 并选中它。
 - 唯一选中结果不同的是第 7 个场景：A 在最好的 host 对上的前两次检查丢包。我们从第一个有效对出现起等 `NOMINATE_WAIT_HOST`（100 毫秒）后提名了次好的对；`is` 先立即提名第一个有效对，等最好的对检查成功后再改提名，最后落在最好的对上。原因是本文有意的简化：只提名一次，提名检查失败才换（§4.5，Q3）。
@@ -1565,9 +1563,9 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
 
 ### 6.3 集成测试
 
-**回环（`cargo test -p leapgate`，coder 做）**：`ice/mod.rs` 里的一个异步测试，两个 agent 用 `gather_on`（§4.2）绑 `127.0.0.1`（和 `::1`），不问 srflx，在进程内交换参数（直接构造 `AnswerParams`，绕过 §2.7 的过滤：`127.0.0.0/8` 属于"丢弃"类），跑到 A 返回 `Selected`；A 在选中的 socket 上 `connect` 后发一个 14 字节、形状同上游 KCP SYN 的数据报，B 返回 `Accepted`，`init_packet` 等于这个数据报；之后两边在 `connect` 过的 socket 上互发一个数据报。再加一条：B 的候选里混一个本机已关闭端口的地址，并给它最高的本地偏好（让它最先被检查）。这个地址会引来 ICMP 端口不可达，验证 ICMP 引来的错误不打断选中（关 `SIO_UDP_CONNRESET` 和接收循环遇错继续，任一条都能让它通过，所以 ioctl 本身由 §6.2 的 Windows 专属测试钉住）。KCP 本身不在这里测：交接后跑的是上游原样的 `KcpStream`，由 §6.4 验。
+**回环（`cargo test -p leapgate`）**：`ice/mod.rs` 里的一个异步测试，两个 agent 用 `gather_on`（§4.2）绑 `127.0.0.1`（和 `::1`），不问 srflx，在进程内交换参数（直接构造 `AnswerParams`，绕过 §2.7 的过滤：`127.0.0.0/8` 属于"丢弃"类），跑到 A 返回 `Selected`；A 在选中的 socket 上 `connect` 后发一个 14 字节、形状同上游 KCP SYN 的数据报，B 返回 `Accepted`，`init_packet` 等于这个数据报；之后两边在 `connect` 过的 socket 上互发一个数据报。再加一条：B 的候选里混一个本机已关闭端口的地址，并给它最高的本地偏好（让它最先被检查）。这个地址会引来 ICMP 端口不可达，验证 ICMP 引来的错误不打断选中（关 `SIO_UDP_CONNRESET` 和接收循环遇错继续，任一条都能让它通过，所以 ioctl 本身由 §6.2 的 Windows 专属测试钉住）。KCP 本身不在这里测：交接后跑的是上游原样的 `KcpStream`，由 §6.4 验。
 
-**真实 NAT（Linux 测试机，需要 root，coder 做，进 MVP 验收）**：总仓库新增 `scripts/linux/ice-netns.sh`，`libs/leapgate` 新增示例程序 `examples/ice_peer.rs`（§4.1）。脚本建下面的网络，在 `s1`、`s2` 两个 netns 里各起一份 leapgate-server（各用自己的临时工作目录，只用它的 21116/UDP STUN；不需要 hbbr、不需要注册设备），在 `a`、`b` 里各跑一个 `ice_peer`。不能用一份服务端挂两个地址做映射自检：服务端的 21116/UDP 绑通配地址、回包不指定源地址（`rendezvous_server.rs` L330、L2026~2035），发往第二个地址的请求从主地址回包，端口受限和对称组的 NAT 会把它丢掉（§9 第 7 条）。
+**真实 NAT（Linux 测试机，需要 root，进 MVP 验收）**：总仓库新增 `scripts/linux/ice-netns.sh`，`libs/leapgate` 新增示例程序 `examples/ice_peer.rs`（§4.1）。脚本建下面的网络，在 `s1`、`s2` 两个 netns 里各起一份 leapgate-server（各用自己的临时工作目录，只用它的 21116/UDP STUN；不需要 hbbr、不需要注册设备），在 `a`、`b` 里各跑一个 `ice_peer`。不能用一份服务端挂两个地址做映射自检：服务端的 21116/UDP 绑通配地址、回包不指定源地址（`rendezvous_server.rs` L330、L2026~2035），发往第二个地址的请求从主地址回包，端口受限和对称组的 NAT 会把它丢掉（§9 第 7 条）。
 
 ```
        s1：203.0.113.1      s2：203.0.113.2        ← 各起一份 leapgate-server，供映射自检
@@ -1588,10 +1586,10 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
 - 示例程序用 `gather_on(&[LocalAddr::new(<本 netns 的地址>, 0)], ..)` 收集（Linux 上 `nics()` 枚举不到网卡，所以示例程序直接给地址），参数经脚本的 fifo 在两个进程之间转交，不经 S 的信令，收方用 `AnswerParams::parse` 解（这里的地址都不属于"丢弃"类）。会合服务器是 IP 字面量，所以 F1 的域名解析不在这个测试里，只有 §6.2 的单测覆盖。
 - NAT 类型（每组 r1、r2 用同一种或按下表组合；以脚本自检为准）：
   - 全锥形（映射和过滤都和对端无关）：一对一映射，`snat` 把 `192.168.x.10` 换成 wan 地址、端口不变，`dnat` 把到 wan 地址的 UDP 全部转回 `192.168.x.10`。
-  - 端口受限锥形（映射和对端无关、过滤看对端地址和端口）：`masquerade`（端口不冲突时 conntrack 保留源端口，没有入站 DNAT，只放行已有 conntrack 的回包），**并且 wan 口进来的 `ct state new` 包要在 filter 的 input、forward 两个钩子上丢弃**。只写 `masquerade` 不够：对端先到的检查包会在路由器上留下一条确认过的 conntrack 条目，内网主机之后发往同一对端时 masquerade 为避开冲突换端口，映射就变成和对端有关的了；在 filter 钩子上丢掉，未确认的条目随包一起丢弃，不会占住映射端口。审查变异 V3 去掉这条丢弃后，端口受限对端口受限 3 次全是 `no_pair`。
+  - 端口受限锥形（映射和对端无关、过滤看对端地址和端口）：`masquerade`（端口不冲突时 conntrack 保留源端口，没有入站 DNAT，只放行已有 conntrack 的回包），**并且 wan 口进来的 `ct state new` 包要在 filter 的 input、forward 两个钩子上丢弃**。只写 `masquerade` 不够：对端先到的检查包会在路由器上留下一条确认过的 conntrack 条目，内网主机之后发往同一对端时 masquerade 为避开冲突换端口，映射就变成和对端有关的了；在 filter 钩子上丢掉，未确认的条目随包一起丢弃，不会占住映射端口。变异 V3 去掉这条丢弃后，端口受限对端口受限 3 次全是 `no_pair`。
   - 对称（映射和对端有关）：`masquerade fully-random`，同样加上面的丢弃。
-- **自检**：每组开始前 `ice_peer --probe` 从同一个 socket 分别向 s1 `203.0.113.1` 和 s2 `203.0.113.2` 发 Binding 请求，比较两次的映射地址：全锥形和端口受限必须相同，对称必须不同。全锥形另做一次行为自检：从 s2 往路由器 wan 口的一个端口发一个主机从没联系过的包，主机必须收到、来源是 s2（只查规则文本里有没有 `dnat` 抓不出 `dnat` 指错主机这类配错，那时会被报成 ICE 失败；审查变异 V5 证实，改成行为自检后它在自检就被抓到）。任一项不符，脚本报"NAT 没配对"、退出码 2。行为自检要用测试机上的 `python3`。
-- 期望和实测（2026-10-25，最终版本：leapgate-server `ebc4028`、客户端 `fa090f666` 编的 `ice_peer`、总仓库 `785a93d` 的脚本；用时是 A 打印的 `in <N> ms`，`no_pair` 是脚本从把 B 的参数交给 A 到 A 退出的时间）：
+- **自检**：每组开始前 `ice_peer --probe` 从同一个 socket 分别向 s1 `203.0.113.1` 和 s2 `203.0.113.2` 发 Binding 请求，比较两次的映射地址：全锥形和端口受限必须相同，对称必须不同。全锥形另做一次行为自检：从 s2 往路由器 wan 口的一个端口发一个主机从没联系过的包，主机必须收到、来源是 s2（只查规则文本里有没有 `dnat` 抓不出 `dnat` 指错主机这类配错，那时会被报成 ICE 失败；变异 V5 证实，改成行为自检后它在自检就被抓到）。任一项不符，脚本报"NAT 没配对"、退出码 2。行为自检要用测试机上的 `python3`。
+- 期望和实测（最终版本：leapgate-server `ebc4028`、客户端 `fa090f666` 编的 `ice_peer`、总仓库 `785a93d` 的脚本；用时是 A 打印的 `in <N> ms`，`no_pair` 是脚本从把 B 的参数交给 A 到 A 退出的时间）：
 
 | a 侧 | b 侧 | 期望 | 实测（每组 3 次） |
 |---|---|---|---|
@@ -1602,12 +1600,12 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
 | 端口受限 | 对称 | `no_pair`，在 `CHECK_TIMEOUT` 内结束 | 3/3 `no_pair`，约 3.01~3.03 秒，B `timed_out` |
 | 对称 | 对称 | `no_pair`，在 `CHECK_TIMEOUT` 内结束 | 3/3 `no_pair`，约 3.01~3.03 秒，B `timed_out` |
 
-  原稿这张表标的是【推测】，6 组 × 3 次全部符合，整套约 70 秒，退出码 0，选中的组 B 每次都 `accepted`、两端都正常退出。NAT 组一律约 324 毫秒，是 `NOMINATE_WAIT_OTHER`（300 毫秒）加检查往返，不是丢包重发。实施过程中同一组结果在不同版本上复跑过多次，都一致。
+  6 组 × 3 次全部符合，整套约 70 秒，退出码 0，选中的组 B 每次都 `accepted`、两端都正常退出。NAT 组一律约 324 毫秒，是 `NOMINATE_WAIT_OTHER`（300 毫秒）加检查往返，不是丢包重发。同一组结果在不同版本上复跑过多次，都一致。
 - 每组跑 3 次，"选中"的组 3 次都要选中，"`no_pair`"的组 3 次都要在 `CHECK_TIMEOUT` 加 1 秒内结束、进程正常退出。每组重建整套 netns（conntrack 一起清掉）；脚本退出时（含中途失败、Ctrl-C）清掉所有 netns 和后台进程，NAT 规则都在 netns 里、随之删除，不碰根 netns。跑完核对过：没有残留的 netns 和 `ice_peer`，根 netns 的 nftables 表和跑前相同。
-- 依赖：`cargo build -p leapgate --example ice_peer` 在测试机上编得过（原标【待实测】，2026-10-25 实测：不用补系统库、不改代码，第一次编译约 6 分钟）；最终版本（`fa090f666`）在测试机上跑 `cargo test -p leapgate`，95 个全部通过（Windows 上是 97 个，差的两条是 Windows 专属的）。
-- 早期版本的 `ice_peer` 每次发 SYN 都用 `?`，B 退出后的 ICMP 让 A 以退出码 2 结束、丢掉结果行，脚本曾在主机上丢弃出站 ICMP 绕开它；示例程序改成忽略这几次发送的错误后（`9b59485fc`），脚本里的这段已删（`785a93d`），上面的实测是删掉以后的结果。
+- 依赖：`cargo build -p leapgate --example ice_peer` 在测试机上编得过（实测：不用补系统库、不改代码，第一次编译约 6 分钟）；最终版本（`fa090f666`）在测试机上跑 `cargo test -p leapgate`，95 个全部通过（Windows 上是 97 个，差的两条是 Windows 专属的）。
+- `ice_peer` 发 SYN 时忽略发送错误：如果用 `?`，B 退出后的 ICMP 会让 A 以退出码 2 结束、丢掉结果行。脚本不在主机上丢弃出站 ICMP，上面的实测就是这样跑的。
 
-### 6.4 端到端验收（维护者）
+### 6.4 端到端验收
 
 **准备**：
 - 测试机上起含本块的 leapgate-server（持有会合私钥）和一台 hbbr（配 `-k`）。
@@ -1616,7 +1614,7 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
 - 判直连**不看** `conn_attempt` 的 `relay_req_count`：上游先给出中继、ICE 在窗口内胜出时，A 已经请求过中继，`conn_attempt` 记 `relay`、`relay_req_count ≥ 1`；ICE 在上游出结果前胜出时，上游那次请求可能记成 `direct_tcp` 或 `no_reply`（§3.7）。
 - **每次连接按结果分四类**（上游路径也在竞速，上游直连先赢时 ICE 被取消、不打日志，§4.12）：
   - **ICE 选中**：控制端（界面进程）日志里有 `leapgate ice: selected …`（§4.12），**并且**服务端 `ice_result` 最新一行是 `connected`，`local_kind`、`remote_kind`、`family`、`local_net` 和日志一致（`leapgate-server stats --days 1` 看计数；看单行用 `sqlite3` 查 `select * from ice_result order by id desc limit 1`）。会话窗口里显示的连接类型是 `UDP`（IPv4）或 `IPv6`。
-  - **上游直连先赢**：控制端日志有上游的直连行（局域网多候选 `LAN candidate … won`、IPv6 打洞 `used to establish IPv6 connection`，README §6），没有 `leapgate ice:` 的结果行，服务端 `ice_result` 这一次是 `abandoned`。单独计数，不算 ICE 失败，补测到够数。Leapgate 控制端对自建服务器默认开着 IPv6 打洞（`libs/leapgate/src/options.rs`），S3~S5 里它和 ICE 并跑。要单看 ICE 时，测试期间把 A 设成 `enable-ipv6-punch=N`、`enable-udp-punch=Y`：自建服务器上 `enable-udp-punch` 默认是 N（`options.rs` 只把 IPv6 打洞默认改成开），只关 `enable-ipv6-punch` 时两个打洞开关都关，ICE 也不启动（§4.8.1 启用条件，F2）。2026-10-25 跨网验收这样设置跑了 200 多次，没有出现上游 UDP 打洞先赢。
+  - **上游直连先赢**：控制端日志有上游的直连行（局域网多候选 `LAN candidate … won`、IPv6 打洞 `used to establish IPv6 connection`，README §6），没有 `leapgate ice:` 的结果行，服务端 `ice_result` 这一次是 `abandoned`。单独计数，不算 ICE 失败，补测到够数。Leapgate 控制端对自建服务器默认开着 IPv6 打洞（`libs/leapgate/src/options.rs`），S3~S5 里它和 ICE 并跑。要单看 ICE 时，测试期间把 A 设成 `enable-ipv6-punch=N`、`enable-udp-punch=Y`：自建服务器上 `enable-udp-punch` 默认是 N（`options.rs` 只把 IPv6 打洞默认改成开），只关 `enable-ipv6-punch` 时两个打洞开关都关，ICE 也不启动（§4.8.1 启用条件，F2）。跨网验收这样设置跑了 200 多次，没有出现上游 UDP 打洞先赢。
   - **ICE 输给中继窗口**：控制端日志有 `leapgate ice: lost the relay window after <N> ms`（§4.12），服务端 `ice_result` 这一次是 `abandoned`，上游给出的是中继（日志 `used to establish Relay connection`，会话窗口显示中继）。算 ICE 没选中，但和"ICE 失败"分开计数、写明 `<N>`：它说明 ICE 能通、只是比中继慢了一个窗口以上，多见于会合服务器离两端很远时（§9 第 24 条）。
   - **ICE 失败**：控制端日志有 `no direct path (…)`、`rejected (…)` 或 `signaling failed`，连接本身照常经上游完成。
 - 两端都不配任何代理规则；S2 那条为了造出场景改一条代理规则，只用于验收。
@@ -1629,9 +1627,9 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
 5. **S4 家里连外网**：方向反过来，期望和通过标准同 S3。
 6. **S5 IPv6 和 srflx 对照**：外地设备在"有 IPv6"和"网卡上临时取消 IPv6"两种状态下各连 5 次。有 IPv6 时期望 `host/v6 <-> host/v6`；取消后期望 IPv4 对、至少一端是 `srflx` 或 `prflx`（这一路就是 Q5 要验的 srflx）。取消 IPv6 后如果外地网络是对称 NAT、选不中，照实记录选中失败的 `outcome` 和服务端 `ice_result`，连接经中继完成即可，不算不通过。
 7. **默认 Windows 防火墙**：找一台 Windows 防火墙为默认设置（域、专用、公用三个配置文件都开着）的机器当 B（笔记 06 实测用的机器防火墙都关着，代表不了普通用户），重复 S1（5 次）和 S3（5 次），安装版、便携版各一轮。记录便携版第一次收到连接时有没有弹防火墙提示、点允许之前和之后 ICE 能不能选中。安装版期望和防火墙关着时一样（安装时加了按程序路径、不限协议的放行规则，`src/platform/windows.rs` L1627~1628【读码】）；便携版的行为【待实测】，结果写回 §9 第 2 条。
-8. **50 次连接断开**：A → B 50 次，每次出画面后停 10~20 秒再关窗口；每第 5 次（第 5、10、…、50 次，共 10 次，多于 `MAX_AGENTS`）改成发出连接后几百毫秒内就结束会话（走取消路径；例如直接结束控制端的会话进程。在"正在连接"时关窗口不行：窗口要等连接建好才退出，ICE 照样走完，2026-10-25 实测）。被控端开着 trace 日志时，看到 `leapgate ice: agent timed out` 才算取消到了；ICE 已经选中才结束的，记为"取消晚了"、补一次。第 50 次之后等 15 秒（超过 `AGENT_TTL`），再连 5 次。全程不能出现 `leapgate ice: no direct path (no_answer)`：B 名额满时静默丢弃 FORWARD（§4.8.2），10 次取消里漏掉 8 个以上名额就会出现。B 进程的句柄数、线程数、专用字节每 10 次记一次（先预热十几次再开始计）；另用同一个 B 进程、两个打洞开关都关（不走 ICE、只走上游）同样连 50 次作对照。判据：线程数和专用字节没有随次数上涨的趋势；ICE 开着时句柄数随次数增长的斜率，不超过对照组斜率的 1.2 倍（2026-10-26 改：原判据"第 50 次不比第 10 次多 20%"区分不了线性增长和没有增长，百分比取决于起点，见 §9 第 25 条）。全程无崩溃、无超过 30 秒既不报错也不回落的卡死。
+8. **50 次连接断开**：A → B 50 次，每次出画面后停 10~20 秒再关窗口；每第 5 次（第 5、10、…、50 次，共 10 次，多于 `MAX_AGENTS`）改成发出连接后几百毫秒内就结束会话（走取消路径；例如直接结束控制端的会话进程。在"正在连接"时关窗口不行：窗口要等连接建好才退出，ICE 照样走完，实测如此）。被控端开着 trace 日志时，看到 `leapgate ice: agent timed out` 才算取消到了；ICE 已经选中才结束的，记为"取消晚了"、补一次。第 50 次之后等 15 秒（超过 `AGENT_TTL`），再连 5 次。全程不能出现 `leapgate ice: no direct path (no_answer)`：B 名额满时静默丢弃 FORWARD（§4.8.2），10 次取消里漏掉 8 个以上名额就会出现。B 进程的句柄数、线程数、专用字节每 10 次记一次（先预热十几次再开始计）；另用同一个 B 进程、两个打洞开关都关（不走 ICE、只走上游）同样连 50 次作对照。判据：线程数和专用字节没有随次数上涨的趋势；ICE 开着时句柄数随次数增长的斜率，不超过对照组斜率的 1.2 倍（不用"第 50 次不比第 10 次多 20%"：它区分不了线性增长和没有增长，百分比取决于起点，见 §9 第 25 条）。全程无崩溃、无超过 30 秒既不报错也不回落的卡死。
 9. **回落**：(a) A 连一台原版或 0.3.0 的 Leapgate 被控端：控制端日志有 `leapgate ice: rejected (unsupported), falling back`，连接经上游照常完成；(b) 服务端控制台 `aur Y` 打开强制中继后连一次：`rejected (relay)`，连接走中继，测完 `aur N`；(c) A 的客户端设置里配一个代理后连一次：控制端日志里没有任何 `leapgate ice:` 行；(d) B 配一个包含 A 公网 IP 的 IP 白名单后连一次：`rejected (unsupported)`，连接经上游照常完成，测完清掉白名单；(e) A 把"UDP 打洞"（`enable-udp-punch`）和"IPv6 P2P"（`enable-ipv6-punch`）都关掉后连一次：控制端日志里没有任何 `leapgate ice:` 行（F2），测完改回。
-10. **fake-ip 下的 srflx**（F1，2026-10-25 加）：两端的会合服务器改填一个指向测试机的域名（可以用 sslip.io 这类把 IP 写进域名的公共通配 DNS，不用另配记录），开 mihomo 的 fake-ip TUN。先在 A 上用 `Resolve-DnsName` 确认系统解析这个域名得到的是 `198.18/15` 的地址；然后按第 6 步"取消 IPv6"那一半连 5 次，期望和第 6 步相同（IPv4 对、至少一端是 `srflx` 或 `prflx`；外地网络是对称 NAT、选不中时照实记录）。F1 不生效时两端都没有 srflx，跨 NAT 的 IPv4 对一个也选不中。
+10. **fake-ip 下的 srflx**（F1）：两端的会合服务器改填一个指向测试机的域名（可以用 sslip.io 这类把 IP 写进域名的公共通配 DNS，不用另配记录），开 mihomo 的 fake-ip TUN。先在 A 上用 `Resolve-DnsName` 确认系统解析这个域名得到的是 `198.18/15` 的地址；然后按第 6 步"取消 IPv6"那一半连 5 次，期望和第 6 步相同（IPv4 对、至少一端是 `srflx` 或 `prflx`；外地网络是对称 NAT、选不中时照实记录）。F1 不生效时两端都没有 srflx，跨 NAT 的 IPv4 对一个也选不中。
 
 判定通过：1~10 全部符合（第 6、10 步的对称 NAT 情况按上面写的口径）。
 
@@ -1643,49 +1641,49 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
 - 修上游 UDP 打洞（S 继续不转发 `udp_port`）；契约 04 的 nonce 表、UDP 上收 `PunchHoleSent`、`TestNatRequest` 填充、UDP 出口证明参与同网判定、P-3 的 H-a；03 的 IPv6 局域网候选和 `listen_dual`（§11）。
 - 端口预测、多随机端口、按 NAT 类型选策略、UPnP/NAT-PMP/PCP（README §7）。
 - 收集 TUN、VPN、虚拟网卡的地址；用 `0.0.0.0` socket 收集或问映射地址；把连服务端的信令 TCP 绑到物理网卡（信令照上游走系统路由；问映射地址的 Binding 和 F1 的 DNS 查询本来就从物理网卡地址发出，§4.3）。
-- 同网判定：本块根本不判同网，也不按发起方 ID、设备主人或地址簿授权决定给不给候选（Q2，维护者原则）；不要求用户配任何代理规则。
+- 同网判定：本块根本不判同网，也不按发起方 ID、设备主人或地址簿授权决定给不给候选（Q2，兼容性原则）；不要求用户配任何代理规则。
 - OFFER 里带 A 的身份或设备 ID；按 A 的身份过滤 B 的候选（Q2）。
 - STUN 错误响应、通用 STUN 服务：leapgate-server 只回不短于 100 字节、带 PADDING 的 Binding 请求，上游的 `ice-servers` 也不能指向它；不去 IANA 注册 `LEAPGATE-PROOF`（§2.9.1）。
 - 反射地址证明的记账表（一次性使用、按来源限额）、每个来源单独的 STUN 限速表：证明无状态，30 秒内重放的后果只是又一次按真实地址处理（§2.8）。
 - 服务端记录 REJECT（每帧都能触发，只打限频日志）；`relay status` 末尾加会话数一行（§3.8）；会话表的过期清理和全表上限（§2.3）；S 上按被控端计的 FORWARD 速率桶（§9 第 13 条）。
 - 服务端判断自己有没有可达的 IPv6、在 `leapgate.toml` 加 IPv6 开关：客户端按会合服务器有没有 AAAA 记录、问不问得到决定（§4.3）。
 - "按设备策略强制中继"拦 ICE：服务端现在没有这个概念（`device_policy.relay_pin` 是固定中继，不是强制中继），强制中继只认 `ALWAYS_USE_RELAY` 和 `--mask`（§3.4.4）。
-- 给 ICE 新增开关或配置项：常数写死（§2.11）。ICE 跟随上游现有的开关：`disable-udp` 打开时不启动；控制端 `enable-udp-punch`、`enable-ipv6-punch` 两个打洞开关都关时也不启动（F2，维护者 2026-10-25 定，§4.8.1）。
+- 给 ICE 新增开关或配置项：常数写死（§2.11）。ICE 跟随上游现有的开关：`disable-udp` 打开时不启动；控制端 `enable-udp-punch`、`enable-ipv6-punch` 两个打洞开关都关时也不启动（F2，§4.8.1）。
 - 改 `kcp_stream.rs`、`punch_udp`、`create_tcp_connection`、`handle_punch_hole` 的签名和语句；改 hbb_common 的 `.rs`（cardo 只加 proto）。
 - 候选沿用 `AddrMangle`（§2.6）；服务端引入 `stun_codec`（§3.2.3）；除 `stun_codec`、`bytecodec`、`crc32fast` 的直接声明外引入任何新包（§3.10、§4.10）。
 - 会合层签名、公钥轮换、私钥加密存放，以及 P-B 的"另生成一对 X25519 密钥"（退出兼容前单独定，§8）。
 - 非 Windows 平台的收集（枚举不到物理网卡就不出 ICE）；给原版客户端补 UDP 直连。
 
-## 8. 需要维护者定的问题
+## 8. 取舍
 
-没有待定问题：笔记 07 §9 的 Q1~Q9 和起草中提出的 P-A、P-B 都已由维护者定（§1，AGENTS.md"自研 ICE 的决定"一条）；其余取舍按维护者原则和工程取舍原则自定，写在 §1。被否的备选留作记录：
+没有待定问题：笔记 07 §9 的 Q1~Q9 和起草中提出的 P-A、P-B 的决定见 §1 和 README §1.3；其余取舍按兼容性原则和工程取舍原则定，写在 §1。被否的备选留作记录：
 - P-A 的备选：MVP 只看控制端日志，赢家上报留到第三步。服务端就没有 ICE 的数据，回落率失真、调中继等待窗口没有依据。采用的做法和代价见 §2.3 ⑦、§3.7、§9 第 6 条；不和 `conn_attempt` 按 IP 硬合并，是因为 A 的信令连接和打洞连接端口不同，硬合并会合错。
 - P-B 的备选：B 另生成一对 X25519 密钥，在已签名的心跳里上报，S 存进 `Peer`。要加心跳字段、S 的内存状态和一套密钥的生成保存，没上报过新公钥的 B 不能做 ICE；留到退出兼容前和会合层签名一起再看。采用的做法和取舍见 §2.5"已知取舍"。
 
 ## 9. 已知限制和风险
 
-1. **自写状态机的正确性和审查成本**（最大风险）。检查内核写成 sans-IO，用模拟网络（§6.2）、回环和测试机上的真实 NAT（§6.3）压住；审查轮数可能像第一期那样多。按 `client/AGENTS.md`"Corner cases"那节控制：只修崩溃、丢数据、削弱安全的，其余按干净失败记为已知限制。
+1. **自写状态机的正确性**（最大风险）。检查内核写成 sans-IO，用模拟网络（§6.2）、回环和测试机上的真实 NAT（§6.3）压住。按 `client/AGENTS.md`"Corner cases"那节控制：只修崩溃、丢数据、削弱安全的，其余按干净失败记为已知限制。
 2. **默认 Windows 防火墙下的行为没实测**。笔记 06 实测的机器防火墙都关着。安装版有按程序路径、不限协议的放行规则，预期不受影响；便携版第一次收包可能弹提示，用户不点允许时入站检查会被挡住，只剩"本端先发、对端回应"的那些对【待实测，§6.4 第 7 步】。
 3. **纯中继场景最多晚一个窗口**。上游先给出中继、ICE 还在检查时，最多压 `relay_fallback_delay_ms()` 那么久（用户选项，默认取上游的值）。ICE 在"没有候选""收到 REJECT"时几十毫秒就失败，不压；真正多等的是"有候选但都不通"（例如两端都是对称 NAT、又没有 IPv6）。等 `ice_result` 有了数据再调（第三步）。
 4. **被控端没配 Key 或 Key 配错时，控制端白等**。S 看不出 B 能不能验签（锁定和心跳都只用设备签名），照样转发；B 静默丢弃，A 等满 `ANSWER_WAIT`（4 秒）。上游先给出中继时，这次连接多等一个窗口。修它要在心跳里加"能验签"的字段（新状态），按 `client/AGENTS.md` 记为已知限制。Leapgate 构建一般注入默认 Key，这种情况只出现在自己编、没注入也没填 Key 的部署。
 5. **能力缓存按 API 根地址记，信令走会合服务器**：两者不是同一台时可能误判，干净失败（§2.12，和契约 02 §9 第 11 条同类）。另外继承 01 的两条：第一次心跳成功前、界面进程把缓存写回旧值的那几秒，`has_feature` 为假，这一次不出 ICE（契约 01 §9）。
 6. **`conn_attempt` 仍然失真，`ice_result` 不认证**。P-A 只是把 ICE 的结果另记一张表，`conn_attempt` 本身照旧（ICE 胜出时上游那一行可能是 `relay`、`direct_tcp`、`no_reply`）。算回落率要两张表按"A 的公网 IP + B 的 ID + 时间"对照（`stats` 里有口径说明，§3.8）。`ice_result` 控制端可以乱报（每来源、全局限额兜住行数，§3.9），只影响统计，不参与任何决策；`abandoned` 里混着"被竞速取消"和"控制端异常退出"两种。
 7. **会合服务器的 21116/UDP 回包源地址必须等于客户端发往的地址**：服务端绑通配地址、回包不指定源地址，多地址主机上发往次地址的 Binding 请求从主地址回包，端口受限和对称 NAT 后面的客户端收不到，拿不到 srflx 和证明，只剩 host 和 prflx。上游的 UDP 注册同样受这一条影响；部署时让会合服务器的域名只解析到回包用的那个地址，或用 `-b` 绑定。客户端认 Binding 响应只看事务号、不看来源（§2.9.3），全锥形 NAT 后面的照样拿得到。
-8. **选中后不换路径**（没有续选）：选中的地址失效（ULA 每隔几十分钟出现又消失、临时全局地址过期、换网），远程桌面这类走 `io_loop` 的会话在 KCP 静默 8 秒后整次重连（`io_loop.rs` `KCP_PEER_SILENCE_LIMIT`）；端口转发和出口隧道不自动重连，等下一个本地连接进来才重新登录（2026-10-28 读码更正，原文没分会话类型）。MVP 让私网 IPv4 排在 IPv6 前面就是为此（Q7）。
+8. **选中后不换路径**（没有续选）：选中的地址失效（ULA 每隔几十分钟出现又消失、临时全局地址过期、换网），远程桌面这类走 `io_loop` 的会话在 KCP 静默 8 秒后整次重连（`io_loop.rs` `KCP_PEER_SILENCE_LIMIT`）；端口转发和出口隧道不自动重连，等下一个本地连接进来才重新登录（读码确认）。MVP 让私网 IPv4 排在 IPv6 前面就是为此（Q7）。
 9. **UDP 被封的网络**：ICE 失败，上游 TCP 路径和中继接住，不比现在差；ICE-TCP 在第三步。
 10. **两端都是对称 NAT、端口受限对对称 NAT，又没有 IPv6**：ICE 打不通，走中继（不做端口预测）。家宽 CGNAT 下 IPv4 能不能打通取决于运营商 NAT 是不是端点无关映射，无法保证；有原生 IPv6 时走 IPv6 host 对。
 11. **STUN 令牌桶是全局的**：被人灌满时，那一刻所有人都拿不到映射地址和证明，只剩 host 候选，公网 IPv4 候选在 S 的过滤里被去掉，不比没有 ICE 差。S 重启后旧证明全部失效，只影响那一刻正在建立的几次连接。
 12. **`io_loop` 写库停顿**（每次最多约 0.4 秒，`server/LEAPGATE.md` §6 第 7 条）会晚发 STUN 回包和 FORWARD：Binding 有两次重发、OFFER 有一次重发，偶尔拿不到 srflx 就靠检查中学到的 prflx 补。
 13. **被控端的 ICE 可以被人占满**：知道 B 的 ID 和 S 的 Key、B 又在线的人，能让 S 不断给 B 转发 FORWARD，占满 B 的 8 个名额（每个最多活 `AGENT_TTL`）或 1024 条去重表（每条最多约 81 秒）。S 的每来源 8 条只限同时在表里的会话、不限速率：A 发完 OFFER 立刻关连接，名额就空出来。后果是这段时间 B 静默丢弃 FORWARD，ICE 不可用，A 按 `no_answer` 收摊、走上游路径。B 名额满时不回 REJECT，回 REJECT 也占名额（§4.8.2），所以 B 为 ICE 开出的 TCP 同时最多 8 条，只占 B 在 S 上每来源 32 条并发里的 8 条，上游的打洞回包和 LocalAddr 连接仍有余量。真要限速，得在 S 加按 B 计的 FORWARD 速率桶（新状态），这里记为已知限制。和上游打洞名额（各 32 个）同一类。
-14. **隐私面（Q2）**：任何知道 B 的 ID、S 的 Key、B 又在线的人，都能拿到 B 物理网卡上的私网 IPv4、ULA、每个 /64 一个临时全局 IPv6 和 srflx。TUN、VPN、虚拟机网卡的地址不交。和现在比，新增的是"跨网时也给私网地址和 ULA"（现在只在 S 判同网后才给私网 IPv4）；B 的候选只经过两段加密 TCP，A 的候选在 S → B 那段 UDP 上是密文（Q6），链路上的观察者都看不到，只有 S 看得到。ICE 有意不经过系统的 VPN/TUN（Q9、维护者原则）：开着全隧道 VPN 时，两端物理网卡的出口（srflx 或全局 IPv6）和局域网地址照样交给 S 和对端；上游走 VPN 时对端只能看到 VPN 的出口。
+14. **隐私面（Q2）**：任何知道 B 的 ID、S 的 Key、B 又在线的人，都能拿到 B 物理网卡上的私网 IPv4、ULA、每个 /64 一个临时全局 IPv6 和 srflx。TUN、VPN、虚拟机网卡的地址不交。和现在比，新增的是"跨网时也给私网地址和 ULA"（现在只在 S 判同网后才给私网 IPv4）；B 的候选只经过两段加密 TCP，A 的候选在 S → B 那段 UDP 上是密文（Q6），链路上的观察者都看不到，只有 S 看得到。ICE 有意不经过系统的 VPN/TUN（Q9、兼容性原则）：开着全隧道 VPN 时，两端物理网卡的出口（srflx 或全局 IPv6）和局域网地址照样交给 S 和对端；上游走 VPN 时对端只能看到 VPN 的出口。
 15. **一把设备密钥两种用途**（P-B）：见 §2.5"已知取舍"。
 16. **IPv6 srflx 和 IPv6 跨网路径的验收面不全**：测试机没有 IPv6，§6.3 的 netns 只测 IPv4 NAT，§6.4 的 IPv6 只覆盖 host 对。S 不知道自己有没有可达的 IPv6，客户端只按会合服务器有没有 AAAA、Binding 有没有回来判断。
 17. **服务端在 Windows 上跑（只有开发时）**：会合的 UDP socket 没关 `SIO_UDP_CONNRESET`，向打不通的地址回 STUN 后，下一次收包可能报错、让 `io_loop` 重建 socket【推测，没实测】。正式部署在 Linux 上，Linux 默认不把 ICMP 错误报给没 `connect` 的 UDP socket。
-18. **网卡过滤靠 IfType 和关键字**：新出的虚拟网卡驱动描述不在关键字表里、IfType 又报 6 或 71 时会被当成物理网卡；地址段规则只挡 mihomo、CGNAT 的默认段（Headscale 自定义前缀时 tailnet 地址可能落在私网段）。漏进来的候选最坏只是一对检查失败（socket 关了 ICMP 报错，不会被打死）。Hyper-V 外部虚拟交换机的 `vEthernet` 被当成物理网卡是有意的：那种配置下它就是宿主机真正上网的口（§4.7）。`is_virtual` 变严对已合入的局域网多候选和 02 测速的影响是有意的，见 §4.7 回归面。
+18. **网卡过滤靠 IfType 和关键字**：新出的虚拟网卡驱动描述不在关键字表里、IfType 又报 6 或 71 时会被当成物理网卡；地址段规则只挡 mihomo、CGNAT 的默认段（Headscale 自定义前缀时 tailnet 地址可能落在私网段）。漏进来的候选最坏只是一对检查失败（socket 关了 ICMP 报错，不会被打死）。Hyper-V 外部虚拟交换机的 `vEthernet` 被当成物理网卡是有意的：那种配置下它就是宿主机真正上网的口（§4.7）。`is_virtual` 变严对现有的局域网多候选和 02 测速的影响是有意的，见 §4.7 回归面。
 19. **B 的系统时钟往回跳时 FORWARD 可能被重放一次**：去重条目在一份 FORWARD 再也过不了时间窗时删除（§2.5 第 4 步）。之后 B 的系统时间往回跳，而心跳还没把偏移改回来（偏差超过 30 秒才采信），链路上截获过的旧 FORWARD 可能重新落进 ±40 秒窗口。后果只是为一个早已结束的 session 起一个 agent、占一个名额到 `AGENT_TTL`、向旧候选发最多 (32 + `MAX_PRFLX`) × 5 个检查包（S 那边 session 早已删掉，B 的 ANSWER 被忽略）；要同时有链路上的观察者和时钟回拨，不另加状态。
 20. **上游出错时还要等 ICE**：上游先报错（例如中继失败）而 ICE 还在跑时，`race_ice` 等 ICE 的结果，ICE 成功就用它，失败才返回上游的错误。ICE 腿最长约 16 秒（信令连接 `SIGNAL_TIMEOUT` 3 秒，和收集并行；`ANSWER_WAIT` 4 秒；`CHECK_TIMEOUT` 3 秒；KCP 和身份握手各 3 秒），常见的错误（对端离线、Key 不对）ICE 在信令连接上一两个往返就失败，不多等。
 21. **非 Windows 平台不出 ICE**（第一阶段只做 Windows）。
-22. **F1 的代价和边界**（2026-10-25，§4.3）：
+22. **F1 的代价和边界**（§4.3）：
     - 问物理网卡 DNS 的查询不经过代理，网卡上配的 DNS 服务器能看到查的是会合服务器的名字。
     - 路由器自己做 fake-ip（例如 OpenClash 的 fake-ip 模式）时，网卡 DNS 的答案也是假地址，两边都被丢掉，没有 srflx，只剩 host 和 prflx，打不通就干净回落到上游路径和中继。
     - 网卡 DNS 的 A、AAAA 查询各只发一次、不重发：两个都丢了，或服务器 200 毫秒内没答上，这块网卡的 DNS 就没有答案，开 fake-ip 时这一次没有 srflx。
@@ -1693,17 +1691,17 @@ REJECT 各分支、`filter` 的公网 IPv4 证明、FORWARD 的签名和加密�
     - 网卡 DNS 不读 hosts 文件：hosts 把会合服务器域名指到别处时，信令连接用 hosts 的地址，srflx 的 Binding 发往网卡 DNS 给的地址，可能没有 srflx 或证明对不上。
     - 会合服务器名字解析到回环或 `198.18/15` 时一律没有 srflx（原稿会往那里发一个注定没有回音的 Binding）。
     - 没在开 fake-ip 的真实 Windows 上端到端验过，由 §6.4 第 10 步覆盖。
-23. **控制端启用条件 `ice_enabled` 没有单元测试**：复核时的变异（去掉可信 Key 那一条）存活。它读全局配置（`LocalConfig`、能力缓存），按 `client/AGENTS.md` Tests 节不为它加测试钩子。端到端只覆盖了其中两条：配了代理（§6.4 第 9 步 (c)）和两个打洞开关（第 9 步 (e)）；可信 Key、只允许入站、`other_server`、直连 IP、`disable-udp` 这几条没有专门的验收步骤。
-24. **会合服务器离两端很远时，ICE 可能输给中继窗口**（2026-10-25 跨网验收）：ICE 比上游中继多几个经过会合服务器的往返（A 的信令连接和密钥交换、OFFER → FORWARD、B 新开信令连接和密钥交换再回 ANSWER，之后才是检查、KCP 交接和身份握手），上游中继只要打洞请求、连中继、经中继的身份握手。测试服务器在美国、到国内两端往返约 200 毫秒时，ICE 选中要 2.2~3.7 秒（多数 2.2~2.8 秒），上游中继约 1.3 秒就给出，再等 2.5 秒的窗口，ICE 落在 3.8 秒以后的就输。实测 200 次里 6 次（3%）输给窗口，此前 10 次里 1 次。会合服务器在国内时往返短得多，ICE 会快得多，预计很少输。输的那次走中继，控制端打 `lost the relay window`（§4.12），不影响连接本身。要改善只能调大 `relay-fallback-delay`（所有中继连接都多等）或减少 ICE 的往返（例如被控端复用已有的会合连接回 ANSWER，要改协议），这里不做。
-25. **被控端会话期间句柄缓慢增长，和 ICE 无关**（2026-10-25 跨网验收第 8 步重跑）：被控端主进程在会话开着时每秒约多 0.5 个内核句柄（Mutant 和 Section 成对增加），会话关掉、空闲 4 分钟都不回落；线程数（105~106）和专用字节（165~200 MB）平稳。每次约 25 秒的连接净增约 9 个；A 开 ICE 200 次（R10 → R100 每次 9.0 个）和关掉 ICE 的 200 次（每次 9.0 个）斜率相同，所以不是 ICE 的被控端 agent、socket、KCP 交接或取消路径漏的。按这个斜率，被控端连上几千次会到几万个句柄。来源没查明：客户端仓库的 `src`、`libs` 里搜不到按事件创建互斥量或共享内存（`CreateMutex`、`CreateFileMapping`、`shared_memory`）的地方（只有托盘单实例互斥量、便携服务的共享内存、剪贴板 C 代码里的一个互斥量），可能在抓屏、编解码、音频这类调用的系统库里；没和原版 RustDesk 对照测过。第 8 步"第 50 次不比第 10 次多 20%"这条判据在这种线性增长下取决于起点的句柄数，区分不了有没有泄漏（同一组数据 ICE 开着时 +31%、关掉时因起点高只有 +12%），比较 ICE 开、关两组的斜率才有意义。
-26. **被控端的 KCP 静默关闭是 20 秒，没有 consent 保活**（2026-10-28 加，维护者定）：2026-10-26 夜间复测发现，控制端异常退出后，ICE 会话在被控端要 30~50 秒才关（中继当场关），期间被控端照常采集编码。现在被控端在控制端静默满 20 秒后关会话（§4.8.2 第 7 条，日志 `leapgate ice: peer silent for …, closing the session`）。最初合入的是和控制端相同的 8 秒，审查发现两处代价，改成 20 秒（下面的数值是读码估算，假设控制端本机网络正常、被控端地址没变、用密码登录，没有实测；点击确认的会话重连要被控端再点一次确认，效果等于锁屏；细节在 `client/LEAPGATE.md` §7.10）：
+23. **控制端启用条件 `ice_enabled` 没有单元测试**：去掉可信 Key 那一条的变异不会让任何测试失败。它读全局配置（`LocalConfig`、能力缓存），按 `client/AGENTS.md` Tests 节不为它加测试钩子。端到端只覆盖了其中两条：配了代理（§6.4 第 9 步 (c)）和两个打洞开关（第 9 步 (e)）；可信 Key、只允许入站、`other_server`、直连 IP、`disable-udp` 这几条没有专门的验收步骤。
+24. **会合服务器离两端很远时，ICE 可能输给中继窗口**（跨网实测）：ICE 比上游中继多几个经过会合服务器的往返（A 的信令连接和密钥交换、OFFER → FORWARD、B 新开信令连接和密钥交换再回 ANSWER，之后才是检查、KCP 交接和身份握手），上游中继只要打洞请求、连中继、经中继的身份握手。测试服务器在美国、到国内两端往返约 200 毫秒时，ICE 选中要 2.2~3.7 秒（多数 2.2~2.8 秒），上游中继约 1.3 秒就给出，再等 2.5 秒的窗口，ICE 落在 3.8 秒以后的就输。实测 200 次里 6 次（3%）输给窗口，此前 10 次里 1 次。会合服务器在国内时往返短得多，ICE 会快得多，预计很少输。输的那次走中继，控制端打 `lost the relay window`（§4.12），不影响连接本身。要改善只能调大 `relay-fallback-delay`（所有中继连接都多等）或减少 ICE 的往返（例如被控端复用已有的会合连接回 ANSWER，要改协议），这里不做。
+25. **被控端会话期间句柄缓慢增长，和 ICE 无关**（跨网验收第 8 步实测）：被控端主进程在会话开着时每秒约多 0.5 个内核句柄（Mutant 和 Section 成对增加），会话关掉、空闲 4 分钟都不回落；线程数（105~106）和专用字节（165~200 MB）平稳。每次约 25 秒的连接净增约 9 个；A 开 ICE 200 次（R10 → R100 每次 9.0 个）和关掉 ICE 的 200 次（每次 9.0 个）斜率相同，所以不是 ICE 的被控端 agent、socket、KCP 交接或取消路径漏的。按这个斜率，被控端连上几千次会到几万个句柄。来源没查明：客户端仓库的 `src`、`libs` 里搜不到按事件创建互斥量或共享内存（`CreateMutex`、`CreateFileMapping`、`shared_memory`）的地方（只有托盘单实例互斥量、便携服务的共享内存、剪贴板 C 代码里的一个互斥量），可能在抓屏、编解码、音频这类调用的系统库里；没和原版 RustDesk 对照测过。第 8 步"第 50 次不比第 10 次多 20%"这条判据在这种线性增长下取决于起点的句柄数，区分不了有没有泄漏（同一组数据 ICE 开着时 +31%、关掉时因起点高只有 +12%），比较 ICE 开、关两组的斜率才有意义。
+26. **被控端的 KCP 静默关闭是 20 秒，没有 consent 保活**：实测发现，没有静默关闭时，控制端异常退出后，ICE 会话在被控端要 30~50 秒才关（中继当场关），期间被控端照常采集编码。现在被控端在控制端静默满 20 秒后关会话（§4.8.2 第 7 条，日志 `leapgate ice: peer silent for …, closing the session`）。不取和控制端相同的 8 秒，是因为它有下面两处代价（下面的数值是读码估算，假设控制端本机网络正常、被控端地址没变、用密码登录，没有实测；点击确认的会话重连要被控端再点一次确认，效果等于锁屏；细节在 `client/LEAPGATE.md` §7.10）：
     - "会话结束后锁屏"：上游靠"旧连接关闭时，同一会话的新连接已经登录"来避免远程桌面重连时误锁（`session_reconnected`），而控制端静默满 8 秒才开始重连。被控端 8 秒就关的话，断链只要长到触发重连就几乎都会锁屏。20 秒时，会合服务器在近处，断链约 17 秒以内基本不锁；在远处（往返约 200 毫秒），约 11 秒以内不锁、11~19 秒有时会锁、约 19 秒以上会锁。原稿的 30 秒档也只扛到重连那一轮最后一次发送（9 秒那次重发）的时刻，远处约 18~19 秒、近处约 17 秒，所以近处和 20 秒一样（再长，重连那一轮约 27 秒失败）；要在远处服务器下也完全追平，阈值要约 23 秒。
     - 端口转发和出口隧道：控制端不看 KCP 静默，空闲时靠 18 秒读超时，实际能扛约 11~18 秒的断链。20 秒不比这个早，和原稿一样；8 秒时 5~9 秒的断链就会断。断链期间一直有本地流量时，原稿能扛约 20~29 秒，现在约 18~21 秒。
     - 链路断了约 20 秒以上、控制端其实还在时，被控端照样关会话。要分清"对端没了"和"链路暂时断了"，得做 consent 保活和续选，留在完整版（§7）。
 
 ## 10. 工作量
 
-coder 人天【推测】，依据笔记 07 §7.1 的明细，按新范围重估（MVP 含 srflx、FORWARD 加密、`lan.rs` 的剩余部分、自写竞速、RESULT 和迁移 0006）：
+实现人天【推测】，依据笔记 07 §7.1 的明细，按新范围重估（MVP 含 srflx、FORWARD 加密、`lan.rs` 的剩余部分、自写竞速、RESULT 和迁移 0006）：
 
 | 项 | 人天 |
 |---|---|
@@ -1720,17 +1718,16 @@ coder 人天【推测】，依据笔记 07 §7.1 的明细，按新范围重估�
 | `src/leapgate_hooks.rs`：`race_ice`（自写竞速、启用条件、RESULT）、`on_ice_offer`（spawn、REJECT、ANSWER、KCP accept、`create_tcp_connection`）、挂钩 H-1、H-3 | 2 |
 | 集成测试：回环两 agent 跑到交接（含 ICMP 诱饵）；`ice_peer` 示例和测试机 netns + nftables 脚本 | 1.5 |
 | 和 `is` 0.11 的一次性差分对照（临时分支，不合并、不进 CI，§6.2） | 0.5 |
-| Windows 构建、审查修改 | 1.5 |
+| Windows 构建、返工修改 | 1.5 |
 | **合计** | **约 20（区间 18.5~22.5）** |
 
 - 比笔记 07 §9 Q5 备选的"约 14~15 天"多出来的：FORWARD 加密（约 0.75）、`lan.rs` 剩余部分（02 只做了一半，约 1）、自写竞速（约 0.5）、RESULT 和迁移 0006（约 0.75）、S 手写 STUN（约 0.5）、netns 集成测试从第二步挪进 MVP、共享测试向量。笔记 07 明细里"开工前的 TUN 实测 0.5 天"去掉（S3、S4 已回答，§11）。
-- 维护者端到端约 1.5 天（S1~S5、默认防火墙那台机器、50 次循环、回落四项）。
+- 端到端约 1.5 天（S1~S5、默认防火墙那台机器、50 次循环、回落四项）。
 - 不计入：03 的默认 ID 加盐（另一块）；04 §4.4（可选）。
-- 实际情况（2026-10-25）：实施由 coder agent 完成，从两边挪 proto 子模块指针的提交（2026-10-24 23 时 31 分）到客户端最后一轮修订（25 日 7 时 42 分）约 8 小时，含两边各三路审查、两轮修订、`is` 差分对照和 netns 测试。上表是按人工估的人天，没有按实际重估。
 
 ## 11. 和契约 03、04、笔记 07 的对照
 
-03、04 的逐节去留见两份文件开头的收缩表（2026-10-24），和本文冲突时以本文为准。下面是本块和笔记 07 不同的地方。
+03、04 的逐节去留见两份文件开头的收缩表，和本文冲突时以本文为准。下面是本块和笔记 07 不同的地方。
 
 笔记 07 是改名前写的，读码基线已过时。Q5、Q6、P-A 推翻的三处见 §1 的决定表；下面是其余不同的地方，规则以"本块"一列所指的正文为准，没列出的按笔记 07 原样落地。
 
